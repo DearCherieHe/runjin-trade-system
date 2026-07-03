@@ -1,0 +1,23 @@
+capital:
+  starting_cash: 100000
+  max_position_pct: 0.12
+  no_leverage: true
+risk_limits:
+  max_daily_loss_pct: 0.03
+  max_drawdown_pct: 0.12
+  per_trade_stop_loss_pct: 0.06
+  min_cash_pct: 0.25
+strategies:
+  us_stock_daily:
+    name: Trend following
+    fast_ma: 20
+    slow_ma: 60
+    volatility_window: 20
+    max_annualized_volatility: 0.75
+  crypto_hourly:
+    name: Mean reversion
+    rsi_window: 14
+    lower_rsi: 35
+    upper_rsi: 65
+    bollinger_window: 20
+    bollinger_std: 2

@@ -1,0 +1,5 @@
+entry_time,exit_time,symbol,strategy,position_pct,return_pct,status
+2026-06-18 16:00:00,2026-06-22 16:00:00,NVDA,us_stock_daily,0.12,0.034,closed
+2026-06-23 16:00:00,2026-06-28 16:00:00,PLTR,us_stock_daily,0.1,-0.018,closed
+2026-06-28 10:00:00,2026-06-29 20:00:00,BTC-USD,crypto_hourly,0.08,0.022,closed
+2026-06-30 02:00:00,,ETH-USD,crypto_hourly,0.06,0.009,open

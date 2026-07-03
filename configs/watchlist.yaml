@@ -1,0 +1,31 @@
+watchlist:
+  - ticker: NVDA
+    company: NVIDIA
+    tags: [AI, semiconductors, data center]
+  - ticker: TSLA
+    company: Tesla
+    tags: [EV, autonomy, energy storage]
+  - ticker: SNDK
+    company: Sandisk
+    tags: [memory, storage, AI infrastructure]
+  - ticker: PLTR
+    company: Palantir
+    tags: [AI software, government, enterprise]
+  - ticker: AMD
+    company: Advanced Micro Devices
+    tags: [semiconductors, AI accelerators, CPU]
+  - ticker: AVGO
+    company: Broadcom
+    tags: [semiconductors, networking, infrastructure software]
+  - ticker: TSM
+    company: Taiwan Semiconductor Manufacturing
+    tags: [foundry, advanced nodes, AI supply chain]
+  - ticker: ARM
+    company: Arm Holdings
+    tags: [chip IP, mobile, edge AI]
+  - ticker: SOUN
+    company: SoundHound AI
+    tags: [voice AI, automotive, restaurants]
+  - ticker: CRWV
+    company: CoreWeave
+    tags: [AI cloud, GPUs, data center]
