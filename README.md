@@ -27,12 +27,11 @@ The sidebar supports:
 
 - `Live auto`: try live/near-live sources first, then fall back to sample data.
 - `Sample only`: fully offline demo mode.
-- `Live strict`: raise errors if live sources fail.
 
 Current live adapters:
 
 - US equities: `yfinance`
-- Crypto: Binance public REST klines
+- Crypto: Binance public REST klines, then `yfinance` crypto fallback
 - Optional China market candidates: `finshare`, `opendatatools`, `tushare`
 - Broker placeholder: Tiger OpenAPI / `tigeropen`
 

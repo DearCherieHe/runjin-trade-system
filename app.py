@@ -718,16 +718,24 @@ def main():
     )
     data_mode_label = st.sidebar.radio(
         "Data mode",
-        ["Live auto", "Sample only", "Live strict"],
+        ["Live auto", "Sample only"],
         index=0,
-        help="Live auto tries real sources first and falls back to bundled sample data. Live strict raises errors if live sources fail.",
+        help="Live auto tries real sources first and falls back to bundled sample data.",
     )
     data_mode = {
         "Live auto": "live_auto",
         "Sample only": "sample",
-        "Live strict": "live",
     }[data_mode_label]
-    prices, crypto, financials, scored, forecasts, paper_trades, risk_rules, source_status = load_all_data(data_mode)
+    try:
+        prices, crypto, financials, scored, forecasts, paper_trades, risk_rules, source_status = load_all_data(data_mode)
+    except Exception as exc:
+        st.sidebar.warning("Live data failed; switched to sample mode.")
+        prices, crypto, financials, scored, forecasts, paper_trades, risk_rules, source_status = load_all_data("sample")
+        source_status["runtime_fallback"] = {
+            "mode": "sample",
+            "source": "app_guard",
+            "message": f"UI fallback after live load error: {exc}",
+        }
     page = st.sidebar.radio(
         "Workspace",
         ["Dashboard", "Long Watchlist", "Stock Detail", "K-line Lab", "Short Bot", "Weekly Report"],

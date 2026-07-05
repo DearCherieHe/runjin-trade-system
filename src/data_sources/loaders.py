@@ -4,6 +4,7 @@ import pandas as pd
 
 from src.data_sources.live_sources import (
     fetch_binance_hourly,
+    fetch_yfinance_crypto_hourly,
     fetch_yfinance_prices,
     tiger_openapi_status,
 )
@@ -140,6 +141,7 @@ def _sample_crypto_prices() -> pd.DataFrame:
 def load_crypto_prices(data_mode=None) -> pd.DataFrame:
     mode = _normalize_mode(data_mode)
     if mode in {"live", "live_auto"}:
+        live_errors = []
         try:
             config = load_live_sources_config()
             symbol_map = config["free_sources"]["crypto"]["symbols"]
@@ -151,12 +153,25 @@ def load_crypto_prices(data_mode=None) -> pd.DataFrame:
             }
             return df.sort_values(["symbol", "datetime"]).reset_index(drop=True)
         except Exception as exc:
+            live_errors.append(f"binance_public_rest: {exc}")
+        try:
+            config = load_live_sources_config()
+            symbols = list(config["free_sources"]["crypto"]["symbols"].keys())
+            df = fetch_yfinance_crypto_hourly(symbols)
+            SOURCE_STATUS["crypto"] = {
+                "mode": mode,
+                "source": "yfinance_crypto",
+                "message": "Yahoo Finance crypto hourly fallback",
+            }
+            return df.sort_values(["symbol", "datetime"]).reset_index(drop=True)
+        except Exception as exc:
+            live_errors.append(f"yfinance_crypto: {exc}")
             if mode == "live":
-                raise
+                raise RuntimeError("; ".join(live_errors)) from exc
             SOURCE_STATUS["crypto"] = {
                 "mode": "sample_fallback",
                 "source": "sample",
-                "message": f"Live source unavailable: {exc}",
+                "message": "Live sources unavailable: " + " | ".join(live_errors),
             }
     else:
         SOURCE_STATUS["crypto"] = {"mode": "sample", "source": "sample", "message": "Offline sample data"}

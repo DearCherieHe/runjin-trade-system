@@ -100,6 +100,51 @@ def fetch_binance_hourly(symbol_map, limit=1000):
     return pd.concat(frames, ignore_index=True)
 
 
+def fetch_yfinance_crypto_hourly(symbols, period="60d", interval="1h"):
+    try:
+        import yfinance as yf
+    except ImportError as exc:
+        raise LiveSourceError("yfinance is not installed") from exc
+
+    frames = []
+    for symbol in symbols:
+        try:
+            raw = yf.download(
+                symbol,
+                period=period,
+                interval=interval,
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+            )
+        except Exception as exc:
+            raise LiveSourceError(f"yfinance crypto request failed for {symbol}") from exc
+        if raw.empty:
+            continue
+        data = raw.reset_index()
+        time_col = "Datetime" if "Datetime" in data.columns else "Date"
+        required = ["Open", "High", "Low", "Close", "Volume"]
+        if not set(required).issubset(data.columns):
+            continue
+        data = data[[time_col, *required]].rename(
+            columns={
+                time_col: "datetime",
+                "Open": "open",
+                "High": "high",
+                "Low": "low",
+                "Close": "close",
+                "Volume": "volume",
+            }
+        )
+        data["symbol"] = symbol
+        frames.append(data)
+    if not frames:
+        raise LiveSourceError("yfinance crypto returned no rows")
+    result = pd.concat(frames, ignore_index=True)
+    result["datetime"] = pd.to_datetime(result["datetime"]).dt.tz_localize(None)
+    return result[["datetime", "symbol", "open", "high", "low", "close", "volume"]].dropna()
+
+
 def fetch_finshare_snapshots(symbols):
     try:
         import finshare as fs
