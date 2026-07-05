@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.data_sources.loaders import (
+    get_data_source_status,
     load_crypto_prices,
     load_financials,
     load_kronos_forecast,
@@ -357,16 +358,17 @@ def section_label(text: str):
 
 
 @st.cache_data
-def load_all_data():
-    prices = load_prices()
-    crypto = load_crypto_prices()
+def load_all_data(data_mode):
+    prices = load_prices(data_mode=data_mode)
+    crypto = load_crypto_prices(data_mode=data_mode)
     financials = load_financials()
     notes = load_watchlist_notes()
     forecasts = load_kronos_forecast()
     paper_trades = load_paper_trades()
     risk_rules = load_risk_rules()
     scored = build_score_table(notes)
-    return prices, crypto, financials, scored, forecasts, paper_trades, risk_rules
+    source_status = get_data_source_status()
+    return prices, crypto, financials, scored, forecasts, paper_trades, risk_rules, source_status
 
 
 def fmt_int(value):
@@ -464,13 +466,20 @@ def plot_kline(df, title, forecast=None):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def page_dashboard(prices, crypto, scored, risk_rules):
+def page_dashboard(prices, crypto, scored, risk_rules, source_status):
     page_header(
         "RunJin / Manifested Discipline",
         "润金交易系统",
         "A dark research cockpit for long-term compounding and short-term paper-trading discipline. The interface is designed as a daily operating room: narrative, risk, signal, and review stay visible without turning into noise.",
         ["金水相生", "Offline sample mode", "No leverage", "No real orders"],
     )
+    status_df = pd.DataFrame(
+        [
+            {"layer": key, **value}
+            for key, value in source_status.items()
+        ]
+    )
+    named_table("Data source status", status_df)
 
     nvda = prices.loc[prices["ticker"] == "NVDA"]
     btc = crypto.loc[crypto["symbol"] == "BTC-USD"]
@@ -687,7 +696,6 @@ def page_weekly_report(prices, crypto, scored, risk_rules):
 
 def main():
     inject_design_system()
-    prices, crypto, financials, scored, forecasts, paper_trades, risk_rules = load_all_data()
     st.sidebar.markdown(
         """
         <div style="padding: 10px 4px 18px;">
@@ -697,15 +705,27 @@ def main():
         """,
         unsafe_allow_html=True,
     )
+    data_mode_label = st.sidebar.radio(
+        "Data mode",
+        ["Live auto", "Sample only", "Live strict"],
+        index=0,
+        help="Live auto tries real sources first and falls back to bundled sample data. Live strict raises errors if live sources fail.",
+    )
+    data_mode = {
+        "Live auto": "live_auto",
+        "Sample only": "sample",
+        "Live strict": "live",
+    }[data_mode_label]
+    prices, crypto, financials, scored, forecasts, paper_trades, risk_rules, source_status = load_all_data(data_mode)
     page = st.sidebar.radio(
         "Workspace",
         ["Dashboard", "Long Watchlist", "Stock Detail", "K-line Lab", "Short Bot", "Weekly Report"],
     )
-    st.sidebar.caption("MODE / offline sample data")
+    st.sidebar.caption(f"MODE / {data_mode}")
     st.sidebar.caption("BOUNDARY / V0.1 never places real orders.")
 
     if page == "Dashboard":
-        page_dashboard(prices, crypto, scored, risk_rules)
+        page_dashboard(prices, crypto, scored, risk_rules, source_status)
     elif page == "Long Watchlist":
         page_watchlist(scored)
     elif page == "Stock Detail":

@@ -1,0 +1,46 @@
+mode:
+  default: live_auto
+  fallback: sample
+free_sources:
+  us_equities:
+    primary: yfinance
+    note: "Unofficial Yahoo Finance access; useful for research dashboards, not low-latency execution."
+  china_market:
+    candidates:
+      - finshare
+      - opendatatools
+      - tushare
+    note: "Optional A-share / HK / China market stack. Installed only when needed."
+  crypto:
+    primary: binance_public_rest
+    symbols:
+      BTC-USD: BTCUSDT
+      ETH-USD: ETHUSDT
+    note: "Public Binance spot REST klines; no API key required."
+  filings:
+    primary: sec_edgar
+    note: "Official SEC EDGAR APIs for filings and company facts."
+paid_upgrade_path:
+  broker_api:
+    - tiger_openapi
+  market_data:
+    - polygon
+    - alpaca
+    - finnhub
+    - tiingo
+  fundamentals:
+    - financial_modeling_prep
+    - factset
+    - intrinio
+  news:
+    - benzinga
+    - polygon_news
+    - finnhub_news
+credentials:
+  tiger:
+    enabled: false
+    tiger_id_env: TIGER_ID
+    account_env: TIGER_ACCOUNT
+    private_key_path_env: TIGER_PRIVATE_KEY_PATH
+    license_env: TIGER_LICENSE
+    sandbox_env: TIGER_SANDBOX

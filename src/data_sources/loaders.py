@@ -2,10 +2,23 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.data_sources.live_sources import (
+    fetch_binance_hourly,
+    fetch_yfinance_prices,
+    tiger_openapi_status,
+)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SAMPLE_DIR = ROOT / "data" / "sample"
 CONFIG_DIR = ROOT / "configs"
+SOURCE_STATUS = {
+    "us_equities": {"mode": "sample", "source": "sample", "message": "Offline sample data"},
+    "crypto": {"mode": "sample", "source": "sample", "message": "Offline sample data"},
+    "financials": {"mode": "sample", "source": "sample", "message": "Quarterly sample fundamentals"},
+    "china_market": {"mode": "candidate", "source": "finshare/opendatatools/tushare", "message": "Optional adapters registered"},
+    "broker": {"mode": "placeholder", "source": "tiger_openapi", "message": "Waiting for Tiger credentials"},
+}
 
 
 def load_yaml(path: Path) -> dict:
@@ -76,14 +89,78 @@ def load_risk_rules() -> dict:
     return load_yaml(CONFIG_DIR / "risk_rules.yaml")
 
 
-def load_prices() -> pd.DataFrame:
+def load_live_sources_config() -> dict:
+    return load_yaml(CONFIG_DIR / "live_sources.yaml")
+
+
+def get_data_source_status() -> dict:
+    SOURCE_STATUS["broker"] = {"mode": "placeholder", **tiger_openapi_status()}
+    return SOURCE_STATUS.copy()
+
+
+def _normalize_mode(data_mode):
+    return data_mode or "sample"
+
+
+def _sample_prices() -> pd.DataFrame:
     df = pd.read_csv(SAMPLE_DIR / "us_stock_ohlcv.csv", parse_dates=["date"])
     return df.sort_values(["ticker", "date"]).reset_index(drop=True)
 
 
-def load_crypto_prices() -> pd.DataFrame:
+def load_prices(data_mode=None) -> pd.DataFrame:
+    mode = _normalize_mode(data_mode)
+    if mode in {"live", "live_auto"}:
+        tickers = [item["ticker"] for item in load_watchlist_config()["watchlist"]]
+        try:
+            df = fetch_yfinance_prices(tickers)
+            SOURCE_STATUS["us_equities"] = {
+                "mode": mode,
+                "source": "yfinance",
+                "message": "Live/near-live Yahoo Finance research feed",
+            }
+            return df.sort_values(["ticker", "date"]).reset_index(drop=True)
+        except Exception as exc:
+            if mode == "live":
+                raise
+            SOURCE_STATUS["us_equities"] = {
+                "mode": "sample_fallback",
+                "source": "sample",
+                "message": f"Live source unavailable: {exc}",
+            }
+    else:
+        SOURCE_STATUS["us_equities"] = {"mode": "sample", "source": "sample", "message": "Offline sample data"}
+    return _sample_prices()
+
+
+def _sample_crypto_prices() -> pd.DataFrame:
     df = pd.read_csv(SAMPLE_DIR / "crypto_ohlcv_hourly.csv", parse_dates=["datetime"])
     return df.sort_values(["symbol", "datetime"]).reset_index(drop=True)
+
+
+def load_crypto_prices(data_mode=None) -> pd.DataFrame:
+    mode = _normalize_mode(data_mode)
+    if mode in {"live", "live_auto"}:
+        try:
+            config = load_live_sources_config()
+            symbol_map = config["free_sources"]["crypto"]["symbols"]
+            df = fetch_binance_hourly(symbol_map)
+            SOURCE_STATUS["crypto"] = {
+                "mode": mode,
+                "source": "binance_public_rest",
+                "message": "Public Binance hourly klines",
+            }
+            return df.sort_values(["symbol", "datetime"]).reset_index(drop=True)
+        except Exception as exc:
+            if mode == "live":
+                raise
+            SOURCE_STATUS["crypto"] = {
+                "mode": "sample_fallback",
+                "source": "sample",
+                "message": f"Live source unavailable: {exc}",
+            }
+    else:
+        SOURCE_STATUS["crypto"] = {"mode": "sample", "source": "sample", "message": "Offline sample data"}
+    return _sample_crypto_prices()
 
 
 def load_financials() -> pd.DataFrame:
