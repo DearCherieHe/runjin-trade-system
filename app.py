@@ -379,6 +379,15 @@ def fmt_pct(value):
     return f"{value * 100:.0f}%"
 
 
+def coerce_datetime_key(df, column="date"):
+    normalized = df.copy()
+    normalized[column] = pd.to_datetime(normalized[column], errors="coerce")
+    if getattr(normalized[column].dt, "tz", None) is not None:
+        normalized[column] = normalized[column].dt.tz_convert(None)
+    normalized[column] = normalized[column].astype("datetime64[ns]")
+    return normalized.dropna(subset=[column]).sort_values(column).reset_index(drop=True)
+
+
 def named_table(name, df):
     st.caption(f"TABLE / {name}")
     st.dataframe(df, use_container_width=True, hide_index=True)
@@ -500,9 +509,11 @@ def page_dashboard(prices, crypto, scored, risk_rules, source_status):
         }
     )
     crypto_equity = crypto_bt[["datetime", "equity"]].rename(columns={"datetime": "date", "equity": "Crypto bot"})
+    equity = coerce_datetime_key(equity, "date")
+    crypto_equity = coerce_datetime_key(crypto_equity, "date")
     merged = pd.merge_asof(
-        equity.sort_values("date"),
-        crypto_equity.sort_values("date"),
+        equity,
+        crypto_equity,
         on="date",
         direction="nearest",
     )
