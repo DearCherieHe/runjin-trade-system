@@ -25,6 +25,14 @@ RunJin Trade System now supports three data modes:
    - Alpaca Market Data: real-time/historical equities, options, crypto, WebSocket.
    - Finnhub: real-time WebSocket trades, company news, fundamentals, earnings calendar.
 
+## K-line History Requirements
+
+RunJin supports `1H / 1D / 1W / 1M / 1Q / 1Y` chart periods.
+
+- `1D / 1W / 1M / 1Q / 1Y`: built from daily OHLCV. In live mode the US equity adapter requests `period=max` from yfinance, then resamples weekly/monthly/quarterly/yearly locally.
+- `1H`: free sources usually limit historical coverage. The current adapter tries yfinance 1-hour data on demand and labels the coverage range. For true long-range historical hourly bars, use Polygon, Alpaca, Tiger OpenAPI, or another paid/broker data feed.
+- `Replay as of`: every K-line page can treat a selected historical date as “now” and hides bars after that date, so user judgments can be tested without future leakage.
+
 1.5. **Broker/account data**
    - Tiger OpenAPI: account-gated broker API for market data, account, and trading workflows. In RunJin V0.1 this is only a credential placeholder and must not place orders.
 

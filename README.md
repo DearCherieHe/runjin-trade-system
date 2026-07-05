@@ -43,6 +43,15 @@ python3 scripts/check_live_sources.py
 
 See `docs/live_data_strategy.md` for the paid data-source upgrade path.
 
+## K-line Replay
+
+The Stock Detail and K-line Lab pages support:
+
+- `1H / 1D / 1W / 1M / 1Q / 1Y` periods
+- historical `Replay as of` date selection
+- local OHLCV resampling for weekly/monthly/quarterly/yearly bars
+- coverage notes so live/free-source limits are visible
+
 ## Boundaries
 
 - No real brokerage integration.

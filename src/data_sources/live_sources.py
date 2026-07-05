@@ -10,7 +10,7 @@ class LiveSourceError(RuntimeError):
     pass
 
 
-def fetch_yfinance_prices(tickers, period="1y", interval="1d"):
+def fetch_yfinance_prices(tickers, period="max", interval="1d"):
     try:
         import yfinance as yf
     except ImportError as exc:
