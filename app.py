@@ -110,11 +110,23 @@ code {
 .runjin-hero {
   border: 1px solid var(--rj-line);
   background:
-    linear-gradient(135deg, rgba(46,209,124,0.13), transparent 36%),
-    linear-gradient(180deg, #101211 0%, #080a09 100%);
-  padding: 28px 30px 24px;
-  margin: 0 0 22px;
-  box-shadow: 0 24px 80px rgba(0,0,0,0.32);
+    linear-gradient(90deg, rgba(46,209,124,0.11), transparent 34%),
+    linear-gradient(180deg, #101211 0%, #090b0a 100%);
+  padding: 24px 28px 22px;
+  margin: 0 0 20px;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.035);
+  position: relative;
+  overflow: hidden;
+}
+
+.runjin-hero::after {
+  content: "";
+  position: absolute;
+  right: 26px;
+  top: 24px;
+  width: 140px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(46,209,124,0.55), transparent);
 }
 
 .runjin-kicker {
@@ -123,10 +135,11 @@ code {
   gap: 12px;
   color: var(--rj-green);
   font-family: var(--rj-mono);
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+  opacity: 0.92;
 }
 
 .runjin-kicker::before {
@@ -138,37 +151,40 @@ code {
 }
 
 .runjin-title {
-  font-size: clamp(2.5rem, 5.8vw, 6.5rem);
-  line-height: 0.88;
-  font-weight: 900;
+  font-size: clamp(2.2rem, 4.4vw, 4.9rem);
+  line-height: 0.98;
+  font-weight: 820;
   color: var(--rj-text);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.012em;
   text-wrap: pretty;
+  max-width: 980px;
 }
 
 .runjin-subtitle {
-  max-width: 920px;
-  margin-top: 16px;
-  color: #b8beb8;
-  font-size: 15px;
-  line-height: 1.65;
+  max-width: 1080px;
+  margin-top: 14px;
+  color: #aeb6ae;
+  font-size: 14px;
+  line-height: 1.7;
+  text-wrap: pretty;
 }
 
 .runjin-ribbon {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .runjin-ribbon span {
   border: 1px solid var(--rj-line);
-  background: rgba(255,255,255,0.035);
-  color: var(--rj-muted);
+  background: rgba(255,255,255,0.025);
+  color: #a5ada5;
   font-family: var(--rj-mono);
-  font-size: 11px;
-  padding: 5px 8px;
-  border-radius: 5px;
+  font-size: 10.5px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
 }
 
 .runjin-section {
@@ -308,8 +324,8 @@ hr {
 
 @media (max-width: 800px) {
   .block-container { padding: 1.4rem 1rem 2.4rem; }
-  .runjin-hero { padding: 20px; }
-  .runjin-title { font-size: 3rem; }
+  .runjin-hero { padding: 18px; }
+  .runjin-title { font-size: 2.55rem; }
 }
 </style>
 """
