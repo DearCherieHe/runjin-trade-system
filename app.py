@@ -477,6 +477,27 @@ def plot_kline(df, title, forecast=None):
     st.plotly_chart(fig, use_container_width=True)
 
 
+def forecast_controls(key_prefix):
+    return st.checkbox(
+        "Show research forecast",
+        value=False,
+        key=f"{key_prefix}_show_forecast",
+        help="Off by default. Current forecast data is a local research stub, not a validated model signal.",
+    )
+
+
+def filter_forecast_for_chart(forecast, kline_df, max_price_ratio=2.5):
+    if forecast is None or forecast.empty or kline_df.empty:
+        return pd.DataFrame()
+    latest_close = float(kline_df["close"].dropna().iloc[-1])
+    if latest_close <= 0:
+        return pd.DataFrame()
+    filtered = forecast.copy()
+    for col in ["predicted_close", "lower_band", "upper_band"]:
+        filtered = filtered.loc[filtered[col].between(latest_close / max_price_ratio, latest_close * max_price_ratio)]
+    return filtered.reset_index(drop=True)
+
+
 def build_ticker_kline(prices, ticker, timeframe, as_of=None, data_mode="sample"):
     base = prices.loc[prices["ticker"] == ticker].copy()
     source_note = "watchlist daily source"
@@ -512,7 +533,8 @@ def kline_controls(prices, ticker, key_prefix, data_mode):
         help="Use this date as the current moment. The chart only shows bars available up to that date.",
     )
     st.caption(f"Replay range: {min_date} -> {max_date} / data mode: {data_mode}")
-    return timeframe, as_of
+    show_forecast = forecast_controls(key_prefix)
+    return timeframe, as_of, show_forecast
 
 
 def page_dashboard(prices, crypto, scored, risk_rules, source_status):
@@ -620,11 +642,11 @@ def page_stock_detail(prices, financials, scored, forecasts, data_mode):
     )
     ticker = st.selectbox("Select ticker", scored["ticker"].tolist())
     profile, ticker_financials = get_ticker_profile(scored, financials, ticker)
-    timeframe, as_of = kline_controls(prices, ticker, "detail", data_mode)
+    timeframe, as_of, show_forecast = kline_controls(prices, ticker, "detail", data_mode)
     raw_kline, source_note = build_ticker_kline(prices, ticker, timeframe, as_of, data_mode)
     ticker_prices = add_indicators(raw_kline)
-    use_forecast = timeframe == "1D" and as_of >= prices.loc[prices["ticker"] == ticker, "date"].max().date()
-    forecast = forecasts.loc[forecasts["ticker"] == ticker] if use_forecast else pd.DataFrame()
+    use_forecast = show_forecast and timeframe == "1D" and as_of >= prices.loc[prices["ticker"] == ticker, "date"].max().date()
+    forecast = filter_forecast_for_chart(forecasts.loc[forecasts["ticker"] == ticker], ticker_prices) if use_forecast else pd.DataFrame()
 
     col1, col2, col3, col4 = st.columns(4)
     snapshot = latest_financial_snapshot(ticker_financials)
@@ -634,7 +656,7 @@ def page_stock_detail(prices, financials, scored, forecasts, data_mode):
     col4.metric("OCF margin", fmt_pct(snapshot["operating_cash_flow_margin"]))
 
     st.markdown(
-        f'<div class="runjin-note">K-line coverage: {coverage_summary(ticker_prices)} / {source_note}</div>',
+        f'<div class="runjin-note">K-line coverage: {coverage_summary(ticker_prices)} / {source_note}. Forecast overlay is off by default and filtered for price-scale sanity.</div>',
         unsafe_allow_html=True,
     )
     plot_kline(ticker_prices, f"{ticker} {timeframe} K-line / Replay as of {as_of}", forecast)
@@ -665,11 +687,11 @@ def page_kline_lab(prices, forecasts, data_mode):
     )
     tickers = sorted(prices["ticker"].unique())
     ticker = st.selectbox("Ticker", tickers, index=tickers.index("NVDA") if "NVDA" in tickers else 0)
-    timeframe, as_of = kline_controls(prices, ticker, "lab", data_mode)
+    timeframe, as_of, show_forecast = kline_controls(prices, ticker, "lab", data_mode)
     raw_kline, source_note = build_ticker_kline(prices, ticker, timeframe, as_of, data_mode)
     ticker_prices = add_indicators(raw_kline)
-    use_forecast = timeframe == "1D" and as_of >= prices.loc[prices["ticker"] == ticker, "date"].max().date()
-    forecast = forecasts.loc[forecasts["ticker"] == ticker] if use_forecast else pd.DataFrame()
+    use_forecast = show_forecast and timeframe == "1D" and as_of >= prices.loc[prices["ticker"] == ticker, "date"].max().date()
+    forecast = filter_forecast_for_chart(forecasts.loc[forecasts["ticker"] == ticker], ticker_prices) if use_forecast else pd.DataFrame()
     benchmark_raw = prices.loc[prices["ticker"] == "TSM"].copy()
     benchmark = apply_asof(resample_ohlcv(benchmark_raw, timeframe, "date"), as_of)
     rs = relative_strength(ticker_prices, benchmark) if ticker != "TSM" else pd.DataFrame()
@@ -680,7 +702,7 @@ def page_kline_lab(prices, forecasts, data_mode):
     col3.metric("20D volatility", fmt_pct(ticker_prices["volatility_20"].dropna().iloc[-1]))
 
     st.markdown(
-        f'<div class="runjin-note">K-line coverage: {coverage_summary(ticker_prices)} / {source_note}. Kronos-style forecast is research-only and hidden during historical replay.</div>',
+        f'<div class="runjin-note">K-line coverage: {coverage_summary(ticker_prices)} / {source_note}. Forecast overlay is off by default, research-only, hidden during replay, and filtered for price-scale sanity.</div>',
         unsafe_allow_html=True,
     )
     plot_kline(ticker_prices, f"{ticker} {timeframe} Indicators / Replay as of {as_of}", forecast)
