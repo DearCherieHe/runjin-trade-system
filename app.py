@@ -399,7 +399,38 @@ def metric_row(label, value, help_text=None):
     st.metric(label, value, help=help_text)
 
 
-def style_figure(fig, height=None):
+def style_figure(fig, height=None, time_axis=False):
+    range_selector = None
+    range_slider = None
+    bottom_margin = 44
+    if time_axis:
+        range_selector = dict(
+            buttons=[
+                dict(count=7, label="1W", step="day", stepmode="backward"),
+                dict(count=1, label="1M", step="month", stepmode="backward"),
+                dict(count=3, label="1Q", step="month", stepmode="backward"),
+                dict(count=1, label="YTD", step="year", stepmode="todate"),
+                dict(count=1, label="1Y", step="year", stepmode="backward"),
+                dict(label="ALL", step="all"),
+            ],
+            bgcolor="#101211",
+            activecolor="#2ed17c",
+            bordercolor="#303631",
+            borderwidth=1,
+            font=dict(color="#d7dbd5", size=11),
+            x=0,
+            y=1.12,
+            xanchor="left",
+            yanchor="top",
+        )
+        range_slider = dict(
+            visible=True,
+            bgcolor="#101211",
+            bordercolor="#303631",
+            borderwidth=1,
+            thickness=0.08,
+        )
+        bottom_margin = 72
     fig.update_layout(
         paper_bgcolor="#151716",
         plot_bgcolor="#151716",
@@ -415,8 +446,14 @@ def style_figure(fig, height=None):
             xanchor="right",
             x=1,
         ),
-        margin=dict(l=48, r=28, t=52, b=44),
-        xaxis=dict(gridcolor="rgba(255,255,255,0.06)", linecolor="#303631", zerolinecolor="#303631"),
+        margin=dict(l=48, r=28, t=64 if time_axis else 52, b=bottom_margin),
+        xaxis=dict(
+            gridcolor="rgba(255,255,255,0.06)",
+            linecolor="#303631",
+            zerolinecolor="#303631",
+            rangeselector=range_selector,
+            rangeslider=range_slider,
+        ),
         yaxis=dict(gridcolor="rgba(255,255,255,0.06)", linecolor="#303631", zerolinecolor="#303631"),
     )
     if height:
@@ -472,8 +509,8 @@ def plot_kline(df, title, forecast=None):
                 opacity=0.18,
             )
         )
-    fig.update_layout(title=title, xaxis_rangeslider_visible=False, height=470, legend_title="")
-    style_figure(fig, 470)
+    fig.update_layout(title=title, height=470, legend_title="")
+    style_figure(fig, 470, time_axis=True)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -583,7 +620,7 @@ def page_dashboard(prices, crypto, scored, risk_rules, source_status):
     fig.add_trace(go.Scatter(x=merged["date"], y=merged["US stock bot"], name="US stock bot", line=dict(color="#2ed17c")))
     fig.add_trace(go.Scatter(x=merged["date"], y=merged["Crypto bot"], name="Crypto bot", line=dict(color="#d8cb5f")))
     fig.update_layout(title="Paper Equity Curves", yaxis_title="USD")
-    style_figure(fig, 360)
+    style_figure(fig, 360, time_axis=True)
     st.plotly_chart(fig, use_container_width=True)
 
     alerts = []
@@ -713,7 +750,7 @@ def page_kline_lab(prices, forecasts, data_mode):
     if not rs.empty:
         fig = go.Figure(go.Scatter(x=rs["date"], y=rs["relative_strength"], name=f"{ticker} vs TSM"))
         fig.update_layout(title=f"Relative Strength: {ticker} vs TSM")
-        style_figure(fig, 320)
+        style_figure(fig, 320, time_axis=True)
         st.plotly_chart(fig, use_container_width=True)
 
 
@@ -747,7 +784,7 @@ def page_short_bot(prices, crypto, risk_rules, paper_trades):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=bt[time_col], y=bt["equity"], name="Equity", line=dict(color="#2ed17c")))
     fig.update_layout(title=f"{ticker} Paper Equity", yaxis_title="USD")
-    style_figure(fig, 360)
+    style_figure(fig, 360, time_axis=True)
     st.plotly_chart(fig, use_container_width=True)
 
     latest = bt.tail(1).iloc[0]

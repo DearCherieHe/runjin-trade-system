@@ -50,6 +50,7 @@ The Stock Detail and K-line Lab pages support:
 - `1H / 1D / 1W / 1M / 1Q / 1Y` periods
 - historical `Replay as of` date selection
 - local OHLCV resampling for weekly/monthly/quarterly/yearly bars
+- dynamic `1W / 1M / 1Q / YTD / 1Y / ALL` range buttons and dark range sliders on time-series charts
 - coverage notes so live/free-source limits are visible
 
 ## Boundaries
