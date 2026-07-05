@@ -1,6 +1,6 @@
-# Trade Lab
+# RunJin Trade System
 
-Offline-first Streamlit demo for a long-term stock observation desk and a short-term paper-trading lab.
+润金交易系统 is an offline-first Streamlit demo for a long-term stock observation desk and a short-term paper-trading lab.
 
 ## Quick Start
 
