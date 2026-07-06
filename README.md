@@ -31,11 +31,26 @@ The sidebar supports:
 Current live adapters:
 
 - US equities: `yfinance`
+- Market universe: US stocks, A-shares, Hong Kong stocks, and Singapore stocks with a USD 300M equivalent market-cap floor
 - Crypto: Binance public REST klines, then `yfinance` crypto fallback
 - Quarterly fundamentals: `yfinance`
 - FinanceMCP-style research radar: sample-first catalog, optional external CSV via `FINANCE_MCP_RESEARCH_CSV`, optional MCP/HTTP endpoint placeholder via `FINANCE_MCP_HTTP_URL`
 - Optional China market candidates: `finshare`, `opendatatools`, `tushare`
 - Broker placeholder: Tiger OpenAPI / `tigeropen`
+
+## Market Universe
+
+The app separates the broad tradable universe from the hand-scored long-term watchlist.
+
+Universe rule:
+
+- Include US stocks, A-shares, Hong Kong stocks, and Singapore stocks.
+- Exclude symbols with market cap below USD 300M equivalent.
+- Preserve `market`, `exchange`, `currency`, `market_cap_usd`, and Yahoo-compatible ticker fields for filtering and chart selection.
+
+Configure full exchange listing exports in `configs/live_sources.yaml` under `free_sources.market_universe.markets.*.listing_csv`.
+Each CSV can use English or common Chinese column names for ticker, company/name, exchange, currency, market cap, and USD market cap.
+If no full listing CSV is configured, `Live auto` and `Sample only` use a small seeded universe so the UI and validation keep running; `Live strict` fails instead of pretending the universe is complete.
 
 Check source availability:
 

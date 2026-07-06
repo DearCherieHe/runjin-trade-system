@@ -7,6 +7,7 @@ sys.path.insert(0, str(ROOT))
 from src.data_sources.loaders import (
     load_crypto_prices,
     load_financials,
+    load_market_universe,
     load_prices,
     load_risk_rules,
     load_watchlist_config,
@@ -31,9 +32,16 @@ def main():
     prices = load_prices(data_mode="sample")
     crypto = load_crypto_prices(data_mode="sample")
     financials = load_financials(data_mode="sample")
+    market_universe = load_market_universe(data_mode="sample")
     notes = load_watchlist_notes()
     risk_rules = load_risk_rules()
     scored = build_score_table(notes)
+
+    required_universe_cols = ["ticker", "yahoo_ticker", "market", "exchange", "currency", "market_cap_usd"]
+    for col in required_universe_cols:
+        assert_true(col in market_universe.columns, f"Market universe missing {col}")
+    assert_true({"US", "A_SHARE_SH", "A_SHARE_SZ", "HK", "SG"}.issubset(set(market_universe["market"])), "Market universe missing required markets")
+    assert_true((market_universe["market_cap_usd"] >= 300_000_000).all(), "Market universe includes micro caps below USD 300M")
 
     for ticker in tickers:
         assert_true(not prices.loc[prices["ticker"] == ticker].empty, f"Missing price rows for {ticker}")

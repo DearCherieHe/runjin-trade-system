@@ -9,6 +9,7 @@ from src.data_sources.live_sources import (
     fetch_yfinance_prices,
     tiger_openapi_status,
 )
+from src.data_sources.market_universe import build_market_universe
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,6 +17,7 @@ SAMPLE_DIR = ROOT / "data" / "sample"
 CONFIG_DIR = ROOT / "configs"
 SOURCE_STATUS = {
     "us_equities": {"mode": "live_pending", "source": "yfinance", "message": "Waiting for live market data"},
+    "market_universe": {"mode": "live_pending", "source": "configured_listings", "message": "Waiting for market universe"},
     "crypto": {"mode": "live_pending", "source": "binance_public_rest", "message": "Waiting for live crypto data"},
     "financials": {"mode": "live_pending", "source": "yfinance", "message": "Waiting for live quarterly fundamentals"},
     "forecast": {"mode": "disabled", "source": "none", "message": "Local sample forecast disabled in live mode"},
@@ -35,6 +37,8 @@ def load_yaml(path: Path) -> dict:
             return _fallback_watchlist()
         if path.name == "risk_rules.yaml":
             return _fallback_risk_rules()
+        if path.name == "live_sources.yaml":
+            return _fallback_live_sources()
         raise
 
 
@@ -80,6 +84,26 @@ def _fallback_risk_rules() -> dict:
                 "bollinger_window": 20,
                 "bollinger_std": 2,
             },
+        },
+    }
+
+
+def _fallback_live_sources() -> dict:
+    return {
+        "mode": {"default": "live_auto", "fallback": "sample"},
+        "free_sources": {
+            "market_universe": {
+                "min_market_cap_usd": 300000000,
+                "fx_to_usd": {"USD": 1.0, "CNY": 0.14, "HKD": 0.128, "SGD": 0.74},
+                "markets": {
+                    "US": {"exchange": "NYSE/Nasdaq/AMEX", "currency": "USD", "listing_csv": ""},
+                    "A_SHARE_SH": {"exchange": "SSE", "currency": "CNY", "listing_csv": ""},
+                    "A_SHARE_SZ": {"exchange": "SZSE", "currency": "CNY", "listing_csv": ""},
+                    "HK": {"exchange": "HKEX", "currency": "HKD", "listing_csv": ""},
+                    "SG": {"exchange": "SGX", "currency": "SGD", "listing_csv": ""},
+                },
+            },
+            "crypto": {"symbols": {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}},
         },
     }
 
@@ -203,6 +227,30 @@ def load_financials(data_mode=None) -> pd.DataFrame:
     else:
         SOURCE_STATUS["financials"] = {"mode": "sample", "source": "sample", "message": "Quarterly sample fundamentals"}
     return pd.read_csv(SAMPLE_DIR / "financial_metrics.csv", parse_dates=["quarter"])
+
+
+def load_market_universe(data_mode=None) -> pd.DataFrame:
+    mode = _normalize_mode(data_mode)
+    config = load_live_sources_config()
+    try:
+        df = build_market_universe(config, ROOT, data_mode=mode)
+        source = "configured_listings" if not df.empty and not (df["source"] == "seed_universe").all() else "seed_universe"
+        SOURCE_STATUS["market_universe"] = {
+            "mode": mode if source != "seed_universe" else "sample_seed",
+            "source": source,
+            "message": "US, A-share, HK, and SG universe filtered at USD 300M market cap",
+        }
+        return df
+    except Exception as exc:
+        if mode == "live":
+            raise
+        df = build_market_universe(config, ROOT, data_mode="sample")
+        SOURCE_STATUS["market_universe"] = {
+            "mode": "sample_seed",
+            "source": "seed_universe",
+            "message": f"Configured universe unavailable: {exc}",
+        }
+        return df
 
 
 def load_watchlist_notes() -> pd.DataFrame:

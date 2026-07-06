@@ -4,7 +4,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.data_sources.loaders import get_data_source_status, load_crypto_prices, load_financials, load_prices
+from src.data_sources.loaders import (
+    get_data_source_status,
+    load_crypto_prices,
+    load_financials,
+    load_market_universe,
+    load_prices,
+)
 
 
 def main():
@@ -14,6 +20,12 @@ def main():
         print(f"US equities rows: {len(stocks):,}")
     except Exception as exc:
         print(f"US equities failed: {exc}")
+
+    try:
+        market_universe = load_market_universe(data_mode="live")
+        print(f"Market universe rows: {len(market_universe):,}")
+    except Exception as exc:
+        print(f"Market universe failed: {exc}")
 
     try:
         crypto = load_crypto_prices(data_mode="live")

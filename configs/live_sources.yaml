@@ -5,6 +5,44 @@ free_sources:
   us_equities:
     primary: yfinance
     note: "Unofficial Yahoo Finance access; useful for research dashboards, not low-latency execution."
+  market_universe:
+    min_market_cap_usd: 300000000
+    fx_to_usd:
+      USD: 1.0
+      CNY: 0.14
+      HKD: 0.128
+      SGD: 0.74
+    markets:
+      US:
+        exchange: NYSE/Nasdaq/AMEX
+        currency: USD
+        yahoo_suffix: ""
+        listing_csv: ""
+        note: "Set listing_csv to a full US exchange listing export with market cap fields."
+      A_SHARE_SH:
+        exchange: SSE
+        currency: CNY
+        yahoo_suffix: ".SS"
+        listing_csv: ""
+        note: "Shanghai A-share listing export; ticker codes are normalized to six digits."
+      A_SHARE_SZ:
+        exchange: SZSE
+        currency: CNY
+        yahoo_suffix: ".SZ"
+        listing_csv: ""
+        note: "Shenzhen A-share listing export; ticker codes are normalized to six digits."
+      HK:
+        exchange: HKEX
+        currency: HKD
+        yahoo_suffix: ".HK"
+        listing_csv: ""
+        note: "HKEX listing export; numeric tickers are normalized to four digits."
+      SG:
+        exchange: SGX
+        currency: SGD
+        yahoo_suffix: ".SI"
+        listing_csv: ""
+        note: "SGX listing export; Yahoo tickers use the .SI suffix where available."
   china_market:
     candidates:
       - finshare

@@ -9,6 +9,7 @@ from src.data_sources.loaders import (
     load_crypto_prices,
     load_financials,
     load_kronos_forecast,
+    load_market_universe,
     load_prices,
     load_risk_rules,
     load_watchlist_notes,
@@ -364,6 +365,7 @@ def load_all_data(data_mode):
     prices = load_prices(data_mode=data_mode)
     crypto = load_crypto_prices(data_mode=data_mode)
     financials = load_financials(data_mode=data_mode)
+    market_universe = load_market_universe(data_mode=data_mode)
     notes = load_watchlist_notes()
     forecasts = load_kronos_forecast(data_mode=data_mode)
     finance_research, finance_mcp_status = load_finance_mcp_research(data_mode=data_mode)
@@ -371,7 +373,7 @@ def load_all_data(data_mode):
     scored = build_score_table(notes)
     source_status = get_data_source_status()
     source_status["finance_mcp"] = finance_mcp_status
-    return prices, crypto, financials, scored, forecasts, finance_research, risk_rules, source_status
+    return prices, crypto, financials, market_universe, scored, forecasts, finance_research, risk_rules, source_status
 
 
 def fmt_int(value):
@@ -539,14 +541,18 @@ def filter_forecast_for_chart(forecast, kline_df, max_price_ratio=2.5):
 def build_ticker_kline(prices, ticker, timeframe, as_of=None, data_mode="sample"):
     base = prices.loc[prices["ticker"] == ticker].copy()
     source_note = "watchlist daily source"
-    if timeframe == "1H" and data_mode in {"live_auto", "live"}:
+    if data_mode in {"live_auto", "live"} and (timeframe == "1H" or base.empty):
         try:
-            base = fetch_yfinance_prices([ticker], period="730d", interval="1h")
-            source_note = "yfinance 1h on-demand; free intraday history is limited"
+            interval = "1h" if timeframe == "1H" else "1d"
+            period = "730d" if timeframe == "1H" else "max"
+            base = fetch_yfinance_prices([ticker], period=period, interval=interval)
+            source_note = f"yfinance {interval} on-demand; free-source coverage can vary by market"
         except Exception as exc:
             if data_mode == "live":
                 raise
             source_note = f"hourly live unavailable, using daily source: {exc}"
+    if base.empty:
+        return base, f"no OHLCV rows for {ticker}; configure a live source or choose a seeded watchlist ticker"
     kline = resample_ohlcv(base, timeframe, "date")
     kline = apply_asof(kline, as_of)
     return kline, source_note
@@ -577,7 +583,7 @@ def kline_controls(prices, ticker, key_prefix, data_mode):
     return timeframe, as_of, show_forecast
 
 
-def page_dashboard(prices, crypto, scored, finance_research, risk_rules, source_status):
+def page_dashboard(prices, crypto, market_universe, scored, finance_research, risk_rules, source_status):
     page_header(
         "RunJin / Manifested Discipline",
         "润金交易系统",
@@ -598,7 +604,7 @@ def page_dashboard(prices, crypto, scored, finance_research, risk_rules, source_
     crypto_bt, crypto_metrics, _, crypto_status, crypto_reason = run_crypto_paper(btc, risk_rules)
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Watchlist", fmt_int(len(scored)))
+    col1.metric("Market universe", fmt_int(len(market_universe)))
     col2.metric("Deep research", fmt_int((scored["bucket"] == "Deep research candidate").sum()))
     col3.metric("US paper bot", stock_status, stock_reason)
     col4.metric("Crypto paper bot", crypto_status, crypto_reason)
@@ -640,6 +646,66 @@ def page_dashboard(prices, crypto, scored, finance_research, risk_rules, source_
         named_table("FinanceMCP high-priority research inputs", high_priority)
 
     named_table("Top long-term candidates", scored[["ticker", "company", "tags", "score_label", "bucket", "growth_evidence"]].head(8))
+
+
+def page_market_universe(market_universe):
+    page_header(
+        "Market Universe / Broad Coverage",
+        "全市场股票池",
+        "The tradable stock pool covers US stocks, A-shares, Hong Kong stocks, and Singapore stocks, then excludes micro caps below USD 300M equivalent before research or chart selection.",
+        ["US", "A-share", "HK", "SG", "USD 300M floor"],
+    )
+    if market_universe.empty:
+        st.warning("No market universe rows are available. Configure full listing CSV files in configs/live_sources.yaml.")
+        return
+
+    markets = sorted(market_universe["market"].dropna().unique())
+    exchanges = sorted(market_universe["exchange"].dropna().unique())
+    currencies = sorted(market_universe["currency"].dropna().unique())
+    col1, col2, col3, col4 = st.columns([1, 1.2, 1, 1.2])
+    selected_markets = col1.multiselect("Market", markets, default=markets)
+    selected_exchanges = col2.multiselect("Exchange", exchanges, default=exchanges)
+    selected_currencies = col3.multiselect("Currency", currencies, default=currencies)
+    min_cap = col4.number_input("Min market cap USD", min_value=0, value=300_000_000, step=50_000_000)
+
+    view = market_universe.loc[
+        market_universe["market"].isin(selected_markets)
+        & market_universe["exchange"].isin(selected_exchanges)
+        & market_universe["currency"].isin(selected_currencies)
+        & (market_universe["market_cap_usd"] >= min_cap)
+    ].copy()
+    market_counts = view.groupby("market", as_index=False)["ticker"].count().rename(columns={"ticker": "count"})
+    cap_by_market = view.groupby("market", as_index=False)["market_cap_usd"].sum()
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Symbols", fmt_int(len(view)))
+    c2.metric("Markets", fmt_int(view["market"].nunique()))
+    c3.metric("Exchanges", fmt_int(view["exchange"].nunique()))
+    c4.metric("Median cap", f"${fmt_int(view['market_cap_usd'].median())}" if not view.empty else "$0")
+
+    if not market_counts.empty:
+        fig = go.Figure(go.Bar(x=market_counts["market"], y=market_counts["count"], marker_color="#2ed17c"))
+        fig.update_layout(title="Universe count by market", yaxis_title="Symbols")
+        style_figure(fig, 320)
+        st.plotly_chart(fig, use_container_width=True)
+
+    if not cap_by_market.empty:
+        named_table("Market cap by market", cap_by_market.assign(market_cap_usd=cap_by_market["market_cap_usd"].map(lambda value: f"${fmt_int(value)}")))
+
+    table = view[
+        [
+            "ticker",
+            "yahoo_ticker",
+            "company",
+            "market",
+            "exchange",
+            "currency",
+            "market_cap_usd",
+            "source",
+        ]
+    ].copy()
+    table["market_cap_usd"] = table["market_cap_usd"].map(lambda value: f"${fmt_int(value)}")
+    named_table("Filtered multi-market stock universe", table)
 
 
 def page_watchlist(scored):
@@ -774,23 +840,48 @@ def page_stock_detail(prices, financials, scored, forecasts, data_mode):
     named_table("Financial trend", fin_view)
 
 
-def page_kline_lab(prices, forecasts, data_mode):
+def page_kline_lab(prices, forecasts, market_universe, data_mode):
     page_header(
         "K-line Lab / Pattern Is Context",
         "K线解读台",
         "Indicators are treated as context, not prophecy. The Kronos-style line is a local research stub and remains visually separated from executable trading signals.",
         ["MA20 / MA60", "RSI / MACD", "Research-only forecast"],
     )
-    tickers = sorted(prices["ticker"].unique())
+    price_tickers = sorted(prices["ticker"].unique())
+    universe_tickers = sorted(market_universe["yahoo_ticker"].dropna().unique()) if not market_universe.empty else []
+    tickers = sorted(set(price_tickers) | set(universe_tickers))
     ticker = st.selectbox("Ticker", tickers, index=tickers.index("NVDA") if "NVDA" in tickers else 0)
-    timeframe, as_of, show_forecast = kline_controls(prices, ticker, "lab", data_mode)
+    ticker_has_loaded_prices = ticker in set(price_tickers)
+    control_prices = prices
+    if not ticker_has_loaded_prices and data_mode in {"live_auto", "live"}:
+        try:
+            control_prices = fetch_yfinance_prices([ticker], period="1y", interval="1d")
+        except Exception as exc:
+            if data_mode == "live":
+                raise
+            st.warning(f"On-demand daily data unavailable for {ticker}: {exc}")
+            return
+    if control_prices.loc[control_prices["ticker"] == ticker].empty:
+        st.warning(f"No daily rows are available for {ticker}.")
+        return
+    timeframe, as_of, show_forecast = kline_controls(control_prices, ticker, "lab", data_mode)
     raw_kline, source_note = build_ticker_kline(prices, ticker, timeframe, as_of, data_mode)
+    if raw_kline.empty:
+        st.warning(source_note)
+        return
     ticker_prices = add_indicators(raw_kline)
-    use_forecast = show_forecast and timeframe == "1D" and as_of >= prices.loc[prices["ticker"] == ticker, "date"].max().date()
+    latest_source_date = control_prices.loc[control_prices["ticker"] == ticker, "date"].max()
+    use_forecast = (
+        show_forecast
+        and timeframe == "1D"
+        and pd.notna(latest_source_date)
+        and as_of >= pd.to_datetime(latest_source_date).date()
+        and ticker in set(forecasts["ticker"])
+    )
     forecast = filter_forecast_for_chart(forecasts.loc[forecasts["ticker"] == ticker], ticker_prices) if use_forecast else pd.DataFrame()
     benchmark_raw = prices.loc[prices["ticker"] == "TSM"].copy()
-    benchmark = apply_asof(resample_ohlcv(benchmark_raw, timeframe, "date"), as_of)
-    rs = relative_strength(ticker_prices, benchmark) if ticker != "TSM" else pd.DataFrame()
+    benchmark = apply_asof(resample_ohlcv(benchmark_raw, timeframe, "date"), as_of) if not benchmark_raw.empty else pd.DataFrame()
+    rs = relative_strength(ticker_prices, benchmark) if ticker != "TSM" and not benchmark.empty else pd.DataFrame()
 
     latest_indicator = ticker_prices.dropna().tail(1)
     kdj_state = "Insufficient data"
@@ -807,8 +898,10 @@ def page_kline_lab(prices, forecasts, data_mode):
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Regime", classify_regime(ticker_prices))
-    col2.metric("Latest RSI", f"{ticker_prices['rsi14'].dropna().iloc[-1]:.0f}")
-    col3.metric("20D volatility", fmt_pct(ticker_prices["volatility_20"].dropna().iloc[-1]))
+    latest_rsi = ticker_prices["rsi14"].dropna()
+    latest_volatility = ticker_prices["volatility_20"].dropna()
+    col2.metric("Latest RSI", f"{latest_rsi.iloc[-1]:.0f}" if not latest_rsi.empty else "N/A")
+    col3.metric("20D volatility", fmt_pct(latest_volatility.iloc[-1]) if not latest_volatility.empty else "N/A")
     col4.metric("KDJ state", kdj_state)
 
     st.markdown(
@@ -915,20 +1008,22 @@ def main():
         "Live strict": "live",
     }[data_mode_label]
     try:
-        prices, crypto, financials, scored, forecasts, finance_research, risk_rules, source_status = load_all_data(data_mode)
+        prices, crypto, financials, market_universe, scored, forecasts, finance_research, risk_rules, source_status = load_all_data(data_mode)
     except Exception as exc:
         st.sidebar.error(f"Live strict failed: {exc}")
         st.sidebar.caption("Switch to Live auto or Sample only to keep the workspace running when public data sources are unavailable.")
         st.stop()
     page = st.sidebar.radio(
         "Workspace",
-        ["Dashboard", "Long Watchlist", "Finance MCP Radar", "Stock Detail", "K-line Lab", "Short Bot", "Weekly Report"],
+        ["Dashboard", "Market Universe", "Long Watchlist", "Finance MCP Radar", "Stock Detail", "K-line Lab", "Short Bot", "Weekly Report"],
     )
     st.sidebar.caption(f"MODE / {data_mode}")
     st.sidebar.caption("BOUNDARY / V0.1 never places real orders.")
 
     if page == "Dashboard":
-        page_dashboard(prices, crypto, scored, finance_research, risk_rules, source_status)
+        page_dashboard(prices, crypto, market_universe, scored, finance_research, risk_rules, source_status)
+    elif page == "Market Universe":
+        page_market_universe(market_universe)
     elif page == "Long Watchlist":
         page_watchlist(scored)
     elif page == "Finance MCP Radar":
@@ -936,7 +1031,7 @@ def main():
     elif page == "Stock Detail":
         page_stock_detail(prices, financials, scored, forecasts, data_mode)
     elif page == "K-line Lab":
-        page_kline_lab(prices, forecasts, data_mode)
+        page_kline_lab(prices, forecasts, market_universe, data_mode)
     elif page == "Short Bot":
         page_short_bot(prices, crypto, risk_rules)
     elif page == "Weekly Report":
