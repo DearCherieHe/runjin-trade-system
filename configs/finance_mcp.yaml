@@ -1,0 +1,30 @@
+integration:
+  mode: sample_first
+  optional_http_url_env: FINANCE_MCP_HTTP_URL
+  optional_research_csv_env: FINANCE_MCP_RESEARCH_CSV
+  note: "FinanceMCP-style sources are treated as research inputs only. They do not generate executable orders."
+capabilities:
+  - name: market_news
+    label: Market news
+    use_case: "Track narrative inflection, catalysts, and disagreement."
+  - name: macro_calendar
+    label: Macro calendar
+    use_case: "Map CPI, rates, liquidity, and policy events against position risk."
+  - name: money_flow
+    label: Money flow
+    use_case: "Watch sector rotation, northbound/southbound flow, ETF flow, and unusual turnover."
+  - name: index_constituents
+    label: Index and constituents
+    use_case: "Understand benchmark inclusion, sector peers, and relative-strength groups."
+  - name: company_fundamentals
+    label: Company fundamentals
+    use_case: "Cross-check revenue, margin, cash flow, valuation, and filings."
+  - name: technical_indicators
+    label: Technical indicators
+    use_case: "Add KDJ and multi-indicator context around K-line decisions."
+  - name: china_market
+    label: China A/H market
+    use_case: "Keep optional FinShare/OpenData/TuShare-style market coverage ready."
+  - name: crypto_market
+    label: Crypto market
+    use_case: "Track BTC/ETH liquidity context for the paper bot."

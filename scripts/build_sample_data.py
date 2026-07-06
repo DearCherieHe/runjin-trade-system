@@ -262,6 +262,24 @@ def make_paper_trades():
     )
 
 
+def make_finance_mcp_research():
+    rows = [
+        ["2026-06-03", "market_news", "NVDA", "AI accelerator demand remains the dominant large-cap semiconductor narrative", "Narrative strength stays high", 5, "finance_mcp_sample", "Keep in deep research; monitor hyperscaler capex digestion"],
+        ["2026-06-04", "money_flow", "NVDA", "AI semiconductor basket shows persistent relative inflow versus broad software", "Flow confirms leadership", 4, "finance_mcp_sample", "Compare NVDA AVGO AMD TSM relative strength weekly"],
+        ["2026-06-05", "company_fundamentals", "PLTR", "Enterprise AI workflow conversion is the key proof point for AIP narrative", "Growth proof watch", 4, "finance_mcp_sample", "Require revenue acceleration and customer expansion in next two quarters"],
+        ["2026-06-06", "macro_calendar", "MARKET", "US rate path and dollar liquidity remain the main valuation-pressure variables", "Macro risk elevated", 4, "finance_mcp_sample", "Reduce short-bot risk after CPI/FOMC volatility spikes"],
+        ["2026-06-08", "index_constituents", "AVGO", "AI networking and custom silicon peers screen as infrastructure compounders", "Value-chain position strong", 4, "finance_mcp_sample", "Keep AVGO TSM NVDA in one supply-chain peer set"],
+        ["2026-06-09", "valuation", "ARM", "Premium valuation requires royalty-rate proof and data-center adoption", "Valuation tolerance low", 3, "finance_mcp_sample", "Do not upgrade without financial proof"],
+        ["2026-06-10", "china_market", "TSM", "Advanced packaging and foundry capacity remain cross-market bottleneck signals", "Supply-chain watch", 4, "finance_mcp_sample", "Track TSM with Asian semiconductor suppliers"],
+        ["2026-06-11", "crypto_market", "BTC-USD", "BTC liquidity proxy remains relevant for crypto paper-bot risk windows", "Risk-on liquidity context", 3, "finance_mcp_sample", "Pause crypto bot after abnormal hourly drawdown"],
+        ["2026-06-12", "filings", "TSLA", "Autonomy and energy-storage evidence must offset EV margin pressure", "Invalidation watch", 4, "finance_mcp_sample", "Require margin stabilization before core sizing"],
+        ["2026-06-13", "market_news", "SOUN", "Voice AI deployments are promising but still speculative without durable unit economics", "Speculative catalyst only", 2, "finance_mcp_sample", "Keep as satellite watch; cap position size"],
+        ["2026-06-14", "money_flow", "AMD", "Second-source AI accelerator trade improves when NVDA valuation risk expands", "Disagreement opportunity", 3, "finance_mcp_sample", "Watch AMD relative strength versus NVDA after pullbacks"],
+        ["2026-06-15", "company_fundamentals", "CRWV", "GPU cloud growth must be checked against debt load utilization and customer concentration", "Quality proof required", 3, "finance_mcp_sample", "Do not treat as core holding until cash-flow proof improves"],
+    ]
+    return pd.DataFrame(rows, columns=["date", "domain", "symbol", "title", "signal", "importance", "source", "action"])
+
+
 def main():
     SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
     watchlist = load_tickers()
@@ -272,6 +290,7 @@ def main():
     make_notes(watchlist).to_csv(SAMPLE_DIR / "watchlist_notes.csv", index=False)
     make_kronos_sample(stock_prices).to_csv(SAMPLE_DIR / "kronos_forecast_sample.csv", index=False)
     make_paper_trades().to_csv(SAMPLE_DIR / "paper_trades_sample.csv", index=False)
+    make_finance_mcp_research().to_csv(SAMPLE_DIR / "finance_mcp_research.csv", index=False)
     print(f"Wrote sample data to {SAMPLE_DIR}")
 
 

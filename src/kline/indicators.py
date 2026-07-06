@@ -10,6 +10,16 @@ def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
+def kdj(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 9) -> tuple[pd.Series, pd.Series, pd.Series]:
+    lowest_low = low.rolling(window).min()
+    highest_high = high.rolling(window).max()
+    rsv = (close - lowest_low) / (highest_high - lowest_low).replace(0, np.nan) * 100
+    k = rsv.ewm(com=2, adjust=False).mean()
+    d = k.ewm(com=2, adjust=False).mean()
+    j = 3 * k - 2 * d
+    return k, d, j
+
+
 def add_indicators(df: pd.DataFrame, price_col: str = "close") -> pd.DataFrame:
     data = df.copy()
     close = data[price_col]
@@ -29,6 +39,9 @@ def add_indicators(df: pd.DataFrame, price_col: str = "close") -> pd.DataFrame:
     data["bb_mid"] = mid
     data["bb_upper"] = mid + 2 * std
     data["bb_lower"] = mid - 2 * std
+
+    if {"high", "low", price_col}.issubset(data.columns):
+        data["kdj_k"], data["kdj_d"], data["kdj_j"] = kdj(data["high"], data["low"], close)
     return data
 
 

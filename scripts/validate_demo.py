@@ -12,6 +12,7 @@ from src.data_sources.loaders import (
     load_watchlist_config,
     load_watchlist_notes,
 )
+from src.data_sources.finance_mcp import load_finance_mcp_capabilities, load_finance_mcp_research
 from src.kline.indicators import add_indicators
 from src.long_term.scoring import SCORE_COLUMNS, build_score_table
 from src.quant_bot.paper_trader import run_crypto_paper, run_us_stock_paper
@@ -40,7 +41,7 @@ def main():
         assert_true(not financials.loc[financials["ticker"] == ticker].empty, f"Missing financials for {ticker}")
 
     nvda_indicators = add_indicators(prices.loc[prices["ticker"] == "NVDA"].copy())
-    required_indicator_cols = ["ma20", "ma60", "rsi14", "macd", "bb_lower", "bb_upper", "volatility_20"]
+    required_indicator_cols = ["ma20", "ma60", "rsi14", "macd", "bb_lower", "bb_upper", "volatility_20", "kdj_k", "kdj_d", "kdj_j"]
     for col in required_indicator_cols:
         assert_true(nvda_indicators[col].notna().sum() > 0, f"Indicator {col} is empty")
 
@@ -61,6 +62,12 @@ def main():
     assert_true(not crypto_trades.empty, "Crypto trade log empty")
     assert_true(stock_status in {"CONTINUE", "STOP", "PAUSE"}, "Invalid stock bot status")
     assert_true(crypto_status in {"CONTINUE", "STOP", "PAUSE"}, "Invalid crypto bot status")
+
+    finance_research, finance_status = load_finance_mcp_research(data_mode="sample")
+    finance_capabilities = load_finance_mcp_capabilities()
+    assert_true(not finance_research.empty, "FinanceMCP research radar is empty")
+    assert_true(not finance_capabilities.empty, "FinanceMCP capability map is empty")
+    assert_true(finance_status["mode"] in {"sample", "external_csv", "mcp_ready_sample_fallback"}, "Invalid FinanceMCP status")
 
     stressed = stock_bt.copy()
     stressed.loc[stressed.index[-1], "equity"] = stressed["equity"].iloc[-2] * 0.90

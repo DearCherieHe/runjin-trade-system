@@ -13,6 +13,7 @@ from src.data_sources.loaders import (
     load_risk_rules,
     load_watchlist_notes,
 )
+from src.data_sources.finance_mcp import load_finance_mcp_capabilities, load_finance_mcp_research
 from src.kline.indicators import add_indicators, classify_regime, relative_strength
 from src.kline.timeframes import apply_asof, coverage_summary, resample_ohlcv
 from src.data_sources.live_sources import fetch_yfinance_prices
@@ -365,10 +366,12 @@ def load_all_data(data_mode):
     financials = load_financials(data_mode=data_mode)
     notes = load_watchlist_notes()
     forecasts = load_kronos_forecast(data_mode=data_mode)
+    finance_research, finance_mcp_status = load_finance_mcp_research(data_mode=data_mode)
     risk_rules = load_risk_rules()
     scored = build_score_table(notes)
     source_status = get_data_source_status()
-    return prices, crypto, financials, scored, forecasts, risk_rules, source_status
+    source_status["finance_mcp"] = finance_mcp_status
+    return prices, crypto, financials, scored, forecasts, finance_research, risk_rules, source_status
 
 
 def fmt_int(value):
@@ -574,7 +577,7 @@ def kline_controls(prices, ticker, key_prefix, data_mode):
     return timeframe, as_of, show_forecast
 
 
-def page_dashboard(prices, crypto, scored, risk_rules, source_status):
+def page_dashboard(prices, crypto, scored, finance_research, risk_rules, source_status):
     page_header(
         "RunJin / Manifested Discipline",
         "润金交易系统",
@@ -632,6 +635,10 @@ def page_dashboard(prices, crypto, scored, risk_rules, source_status):
     else:
         st.markdown('<div class="runjin-note">Risk desk clear: no stop condition is triggered in the current live-data simulation.</div>', unsafe_allow_html=True)
 
+    high_priority = finance_research.loc[finance_research["importance"] >= 4].head(6)
+    if not high_priority.empty:
+        named_table("FinanceMCP high-priority research inputs", high_priority)
+
     named_table("Top long-term candidates", scored[["ticker", "company", "tags", "score_label", "bucket", "growth_evidence"]].head(8))
 
 
@@ -668,6 +675,58 @@ def page_watchlist(scored):
     fig.update_layout(title=f"{selected} component score", yaxis=dict(range=[0, 5]))
     style_figure(fig, 340)
     st.plotly_chart(fig, use_container_width=True)
+
+
+def page_finance_mcp_radar(finance_research, scored, source_status):
+    page_header(
+        "Finance MCP / Data Edge Radar",
+        "全市场情报雷达",
+        "A research-only layer inspired by FinanceMCP: market news, macro calendar, money flow, index membership, fundamentals, China-market candidates, crypto context, and technical signals are collected before they become trade decisions.",
+        ["Research only", "Multi-source", "No auto orders"],
+    )
+
+    status = source_status.get("finance_mcp", {})
+    st.markdown(
+        f'<div class="runjin-note">FinanceMCP adapter: {status.get("mode", "unknown")} / {status.get("source", "unknown")} / {status.get("message", "")}</div>',
+        unsafe_allow_html=True,
+    )
+
+    capabilities = load_finance_mcp_capabilities()
+    named_table("FinanceMCP capability map", capabilities)
+
+    domains = sorted(finance_research["domain"].dropna().unique())
+    tickers = ["ALL"] + sorted(finance_research["symbol"].dropna().unique())
+    col1, col2, col3 = st.columns([1.2, 1.1, 1])
+    selected_domains = col1.multiselect("Research domains", domains, default=domains)
+    selected_symbol = col2.selectbox("Symbol", tickers)
+    min_importance = col3.slider("Min importance", 1, 5, 3)
+
+    view = finance_research.loc[
+        finance_research["domain"].isin(selected_domains)
+        & (finance_research["importance"] >= min_importance)
+    ].copy()
+    if selected_symbol != "ALL":
+        view = view.loc[view["symbol"] == selected_symbol]
+
+    watch_symbols = set(scored["ticker"].tolist()) | {"BTC-USD", "ETH-USD", "MARKET"}
+    watch_hits = view.loc[view["symbol"].isin(watch_symbols)].copy()
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Signals", fmt_int(len(view)))
+    col2.metric("Watchlist hits", fmt_int(len(watch_hits)))
+    col3.metric("High importance", fmt_int((view["importance"] >= 4).sum()))
+    col4.metric("Domains", fmt_int(view["domain"].nunique()))
+
+    if not view.empty:
+        domain_counts = view.groupby("domain", as_index=False)["importance"].sum().sort_values("importance", ascending=False)
+        fig = go.Figure(go.Bar(x=domain_counts["domain"], y=domain_counts["importance"], marker_color="#2ed17c"))
+        fig.update_layout(title="Research pressure by domain", yaxis_title="Importance score")
+        style_figure(fig, 340)
+        st.plotly_chart(fig, use_container_width=True)
+
+    named_table("Filtered research radar", view)
+    if not watch_hits.empty:
+        named_table("Watchlist-linked signals", watch_hits)
 
 
 def page_stock_detail(prices, financials, scored, forecasts, data_mode):
@@ -733,10 +792,24 @@ def page_kline_lab(prices, forecasts, data_mode):
     benchmark = apply_asof(resample_ohlcv(benchmark_raw, timeframe, "date"), as_of)
     rs = relative_strength(ticker_prices, benchmark) if ticker != "TSM" else pd.DataFrame()
 
-    col1, col2, col3 = st.columns(3)
+    latest_indicator = ticker_prices.dropna().tail(1)
+    kdj_state = "Insufficient data"
+    if not latest_indicator.empty:
+        latest_row = latest_indicator.iloc[0]
+        if latest_row["kdj_j"] > 100:
+            kdj_state = "KDJ extended"
+        elif latest_row["kdj_j"] < 0:
+            kdj_state = "KDJ washed out"
+        elif latest_row["kdj_k"] > latest_row["kdj_d"]:
+            kdj_state = "KDJ improving"
+        else:
+            kdj_state = "KDJ cooling"
+
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Regime", classify_regime(ticker_prices))
     col2.metric("Latest RSI", f"{ticker_prices['rsi14'].dropna().iloc[-1]:.0f}")
     col3.metric("20D volatility", fmt_pct(ticker_prices["volatility_20"].dropna().iloc[-1]))
+    col4.metric("KDJ state", kdj_state)
 
     st.markdown(
         f'<div class="runjin-note">K-line coverage: {coverage_summary(ticker_prices)} / {source_note}. Forecast overlay is off by default, research-only, hidden during replay, and filtered for price-scale sanity.</div>',
@@ -744,7 +817,9 @@ def page_kline_lab(prices, forecasts, data_mode):
     )
     plot_kline(ticker_prices, f"{ticker} {timeframe} Indicators / Replay as of {as_of}", forecast)
 
-    indicator_view = ticker_prices.tail(30)[["date", "close", "ma20", "ma60", "rsi14", "macd", "macd_signal", "bb_lower", "bb_upper"]].copy()
+    indicator_view = ticker_prices.tail(30)[
+        ["date", "close", "ma20", "ma60", "rsi14", "macd", "macd_signal", "bb_lower", "bb_upper", "kdj_k", "kdj_d", "kdj_j"]
+    ].copy()
     named_table("Latest indicator values", indicator_view.round(2))
 
     if not rs.empty:
@@ -840,22 +915,24 @@ def main():
         "Live strict": "live",
     }[data_mode_label]
     try:
-        prices, crypto, financials, scored, forecasts, risk_rules, source_status = load_all_data(data_mode)
+        prices, crypto, financials, scored, forecasts, finance_research, risk_rules, source_status = load_all_data(data_mode)
     except Exception as exc:
         st.sidebar.error(f"Live strict failed: {exc}")
         st.sidebar.caption("Switch to Live auto or Sample only to keep the workspace running when public data sources are unavailable.")
         st.stop()
     page = st.sidebar.radio(
         "Workspace",
-        ["Dashboard", "Long Watchlist", "Stock Detail", "K-line Lab", "Short Bot", "Weekly Report"],
+        ["Dashboard", "Long Watchlist", "Finance MCP Radar", "Stock Detail", "K-line Lab", "Short Bot", "Weekly Report"],
     )
     st.sidebar.caption(f"MODE / {data_mode}")
     st.sidebar.caption("BOUNDARY / V0.1 never places real orders.")
 
     if page == "Dashboard":
-        page_dashboard(prices, crypto, scored, risk_rules, source_status)
+        page_dashboard(prices, crypto, scored, finance_research, risk_rules, source_status)
     elif page == "Long Watchlist":
         page_watchlist(scored)
+    elif page == "Finance MCP Radar":
+        page_finance_mcp_radar(finance_research, scored, source_status)
     elif page == "Stock Detail":
         page_stock_detail(prices, financials, scored, forecasts, data_mode)
     elif page == "K-line Lab":

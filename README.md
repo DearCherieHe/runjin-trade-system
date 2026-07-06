@@ -33,6 +33,7 @@ Current live adapters:
 - US equities: `yfinance`
 - Crypto: Binance public REST klines, then `yfinance` crypto fallback
 - Quarterly fundamentals: `yfinance`
+- FinanceMCP-style research radar: sample-first catalog, optional external CSV via `FINANCE_MCP_RESEARCH_CSV`, optional MCP/HTTP endpoint placeholder via `FINANCE_MCP_HTTP_URL`
 - Optional China market candidates: `finshare`, `opendatatools`, `tushare`
 - Broker placeholder: Tiger OpenAPI / `tigeropen`
 
@@ -52,7 +53,18 @@ The Stock Detail and K-line Lab pages support:
 - historical `Replay as of` date selection
 - local OHLCV resampling for weekly/monthly/quarterly/yearly bars
 - dynamic `1W / 1M / 1Q / YTD / 1Y / ALL` range buttons and dark range sliders on time-series charts
+- KDJ, RSI, MACD, Bollinger Bands, moving averages, volatility, and relative strength
 - coverage notes so live/free-source limits are visible
+
+## Finance MCP Radar
+
+The `Finance MCP Radar` page turns FinanceMCP-style capabilities into a research-only layer:
+
+- market news, macro calendar, money flow, index/constituent context, fundamentals, valuation, China-market candidates, and crypto context
+- source/status visibility in the Dashboard data-source table
+- sample-first operation so Streamlit starts without API keys
+- optional external research CSV path through `FINANCE_MCP_RESEARCH_CSV`
+- optional MCP/HTTP service pointer through `FINANCE_MCP_HTTP_URL`
 
 ## Boundaries
 

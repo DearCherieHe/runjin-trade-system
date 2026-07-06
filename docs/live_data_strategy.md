@@ -13,12 +13,18 @@ RunJin Trade System now supports three data modes:
 | US equities OHLCV | yfinance / Yahoo Finance | Free unofficial | Wired | Good for research dashboards; not low-latency execution. |
 | Crypto OHLCV | Binance public REST klines | Free | Wired | Hourly BTC/ETH bars, no API key. |
 | China market stack | finshare / OpenDataTools / TuShare | Free / mixed | Registered optional | Installed only when needed; useful for A-share/HK/China macro style coverage. |
+| FinanceMCP radar | Local catalog / optional external CSV or MCP HTTP service | Free / mixed | Wired sample-first | Research-only layer for news, macro, money flow, index context, valuation, filings, China-market, and crypto context. |
 | Broker API | Tiger OpenAPI | Account-gated | Placeholder | Credentials and package will be enabled later. |
 | Fundamentals | Bundled sample data | Free | Fallback | Real fundamentals need paid APIs or SEC companyfacts integration. |
-| Filings | SEC EDGAR APIs | Free official | Planned | Best legal early source for 8-K, 10-Q, 10-K, Form 4, S-1. |
-| News | Not wired | Mixed | Planned | Free RSS is noisy; paid Benzinga/Polygon/Finnhub is more useful. |
+| Filings | FinanceMCP radar sample / future SEC EDGAR APIs | Free official | Research catalog wired | Best legal early source for 8-K, 10-Q, 10-K, Form 4, S-1. |
+| News | FinanceMCP radar sample / future paid news APIs | Mixed | Research catalog wired | Free RSS is noisy; paid Benzinga/Polygon/Finnhub is more useful. |
 
 ## Paid Upgrade Priority
+
+0. **FinanceMCP service bridge**
+   - Run FinanceMCP as an external research-data service.
+   - Export its normalized outputs into `FINANCE_MCP_RESEARCH_CSV`, or later connect `FINANCE_MCP_HTTP_URL`.
+   - Keep it research-only: no automatic order generation.
 
 1. **Market data**
    - Polygon/Massive: US equities, options, crypto, snapshots, trades, quotes, news.
