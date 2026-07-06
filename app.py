@@ -417,6 +417,20 @@ def metric_row(label, value, help_text=None):
     st.metric(label, value, help=help_text)
 
 
+def has_crypto_symbol(crypto, symbol="BTC-USD"):
+    return not crypto.empty and "symbol" in crypto.columns and not crypto.loc[crypto["symbol"] == symbol].empty
+
+
+def disabled_bot_metrics():
+    return {
+        "total_return": 0,
+        "max_drawdown": 0,
+        "win_rate": 0,
+        "profit_factor": 0,
+        "trade_count": 0,
+    }
+
+
 def style_figure(fig, height=None, time_axis=False):
     range_selector = None
     range_slider = None
@@ -614,9 +628,15 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
     named_table("Data source status", status_df)
 
     nvda = prices.loc[prices["ticker"] == "NVDA"]
-    btc = crypto.loc[crypto["symbol"] == "BTC-USD"]
     stock_bt, stock_metrics, _, stock_status, stock_reason = run_us_stock_paper(nvda, risk_rules)
-    crypto_bt, crypto_metrics, _, crypto_status, crypto_reason = run_crypto_paper(btc, risk_rules)
+    if has_crypto_symbol(crypto, "BTC-USD"):
+        btc = crypto.loc[crypto["symbol"] == "BTC-USD"]
+        crypto_bt, crypto_metrics, _, crypto_status, crypto_reason = run_crypto_paper(btc, risk_rules)
+    else:
+        crypto_bt = pd.DataFrame()
+        crypto_metrics = disabled_bot_metrics()
+        crypto_status = "PAUSE"
+        crypto_reason = "Crypto live source unavailable"
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Market universe", fmt_int(len(market_universe)))
@@ -631,18 +651,13 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
             "US stock bot": stock_bt["equity"],
         }
     )
-    crypto_equity = crypto_bt[["datetime", "equity"]].rename(columns={"datetime": "date", "equity": "Crypto bot"})
     equity = coerce_datetime_key(equity, "date")
-    crypto_equity = coerce_datetime_key(crypto_equity, "date")
-    merged = pd.merge_asof(
-        equity,
-        crypto_equity,
-        on="date",
-        direction="nearest",
-    )
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=merged["date"], y=merged["US stock bot"], name="US stock bot", line=dict(color="#2ed17c")))
-    fig.add_trace(go.Scatter(x=merged["date"], y=merged["Crypto bot"], name="Crypto bot", line=dict(color="#d8cb5f")))
+    fig.add_trace(go.Scatter(x=equity["date"], y=equity["US stock bot"], name="US stock bot", line=dict(color="#2ed17c")))
+    if not crypto_bt.empty:
+        crypto_equity = crypto_bt[["datetime", "equity"]].rename(columns={"datetime": "date", "equity": "Crypto bot"})
+        crypto_equity = coerce_datetime_key(crypto_equity, "date")
+        fig.add_trace(go.Scatter(x=crypto_equity["date"], y=crypto_equity["Crypto bot"], name="Crypto bot", line=dict(color="#d8cb5f")))
     fig.update_layout(title="Paper Equity Curves", yaxis_title="USD")
     style_figure(fig, 360, time_axis=True)
     st.plotly_chart(fig, use_container_width=True)
@@ -957,6 +972,9 @@ def page_backtest_lab(prices, crypto):
         timeframe = st.selectbox("Backtest timeframe", ["1D", "1W", "1M"], index=0, key="bt_stock_timeframe")
         raw = resample_ohlcv(raw, timeframe, "date")
     else:
+        if crypto.empty:
+            st.warning("Crypto live data is unavailable. Switch to US stock or Live auto/Sample only for crypto backtests.")
+            return
         ticker = st.selectbox("Symbol", sorted(crypto["symbol"].unique()), index=0, key="bt_symbol")
         raw = crypto.loc[crypto["symbol"] == ticker].copy()
         time_col = "datetime"
@@ -1061,6 +1079,9 @@ def page_short_bot(prices, crypto, risk_rules):
         bt, metrics, trades, status, reason = run_us_stock_paper(data, risk_rules)
         time_col = "date"
     else:
+        if crypto.empty:
+            st.warning("Crypto live data is unavailable. The crypto paper bot is paused until BTC/ETH hourly data is available.")
+            return
         ticker = st.selectbox("Symbol", sorted(crypto["symbol"].unique()), index=0)
         data = crypto.loc[crypto["symbol"] == ticker].copy()
         bt, metrics, trades, status, reason = run_crypto_paper(data, risk_rules)
@@ -1098,7 +1119,12 @@ def page_weekly_report(prices, crypto, scored, risk_rules):
         ["Continue", "Pause", "Review"],
     )
     stock_bt, stock_metrics, _, stock_status, stock_reason = run_us_stock_paper(prices.loc[prices["ticker"] == "NVDA"].copy(), risk_rules)
-    crypto_bt, crypto_metrics, _, crypto_status, crypto_reason = run_crypto_paper(crypto.loc[crypto["symbol"] == "BTC-USD"].copy(), risk_rules)
+    if has_crypto_symbol(crypto, "BTC-USD"):
+        _, crypto_metrics, _, crypto_status, crypto_reason = run_crypto_paper(crypto.loc[crypto["symbol"] == "BTC-USD"].copy(), risk_rules)
+    else:
+        crypto_metrics = disabled_bot_metrics()
+        crypto_status = "PAUSE"
+        crypto_reason = "Crypto live source unavailable"
     report = build_weekly_report(
         scored,
         {

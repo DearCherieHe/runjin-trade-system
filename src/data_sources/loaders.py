@@ -164,6 +164,10 @@ def _sample_crypto_prices() -> pd.DataFrame:
     return df.sort_values(["symbol", "datetime"]).reset_index(drop=True)
 
 
+def _empty_crypto_prices() -> pd.DataFrame:
+    return pd.DataFrame(columns=["datetime", "symbol", "open", "high", "low", "close", "volume"])
+
+
 def load_crypto_prices(data_mode=None) -> pd.DataFrame:
     mode = _normalize_mode(data_mode)
     if mode in {"live", "live_auto"}:
@@ -193,7 +197,12 @@ def load_crypto_prices(data_mode=None) -> pd.DataFrame:
         except Exception as exc:
             live_errors.append(f"yfinance_crypto: {exc}")
             if mode == "live":
-                raise RuntimeError("; ".join(live_errors)) from exc
+                SOURCE_STATUS["crypto"] = {
+                    "mode": "unavailable",
+                    "source": "none",
+                    "message": "Crypto live sources unavailable: " + " | ".join(live_errors),
+                }
+                return _empty_crypto_prices()
             SOURCE_STATUS["crypto"] = {
                 "mode": "sample_fallback",
                 "source": "sample",
