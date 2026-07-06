@@ -9,7 +9,6 @@ from src.data_sources.loaders import (
     load_crypto_prices,
     load_financials,
     load_kronos_forecast,
-    load_paper_trades,
     load_prices,
     load_risk_rules,
     load_watchlist_notes,
@@ -363,14 +362,13 @@ def section_label(text: str):
 def load_all_data(data_mode):
     prices = load_prices(data_mode=data_mode)
     crypto = load_crypto_prices(data_mode=data_mode)
-    financials = load_financials()
+    financials = load_financials(data_mode=data_mode)
     notes = load_watchlist_notes()
-    forecasts = load_kronos_forecast()
-    paper_trades = load_paper_trades()
+    forecasts = load_kronos_forecast(data_mode=data_mode)
     risk_rules = load_risk_rules()
     scored = build_score_table(notes)
     source_status = get_data_source_status()
-    return prices, crypto, financials, scored, forecasts, paper_trades, risk_rules, source_status
+    return prices, crypto, financials, scored, forecasts, risk_rules, source_status
 
 
 def fmt_int(value):
@@ -519,7 +517,7 @@ def forecast_controls(key_prefix):
         "Show research forecast",
         value=False,
         key=f"{key_prefix}_show_forecast",
-        help="Off by default. Current forecast data is a local research stub, not a validated model signal.",
+        help="Off by default. Local sample forecasts are disabled in live-data mode.",
     )
 
 
@@ -543,6 +541,8 @@ def build_ticker_kline(prices, ticker, timeframe, as_of=None, data_mode="sample"
             base = fetch_yfinance_prices([ticker], period="730d", interval="1h")
             source_note = "yfinance 1h on-demand; free intraday history is limited"
         except Exception as exc:
+            if data_mode == "live":
+                raise
             source_note = f"hourly live unavailable, using daily source: {exc}"
     kline = resample_ohlcv(base, timeframe, "date")
     kline = apply_asof(kline, as_of)
@@ -579,7 +579,7 @@ def page_dashboard(prices, crypto, scored, risk_rules, source_status):
         "RunJin / Manifested Discipline",
         "润金交易系统",
         "A dark research cockpit for long-term compounding and short-term paper-trading discipline. The interface is designed as a daily operating room: narrative, risk, signal, and review stay visible without turning into noise.",
-        ["金水相生", "Offline sample mode", "No leverage", "No real orders"],
+        ["金水相生", "Live data mode", "No leverage", "No real orders"],
     )
     status_df = pd.DataFrame(
         [
@@ -630,7 +630,7 @@ def page_dashboard(prices, crypto, scored, risk_rules, source_status):
     if alerts:
         named_table("Risk alerts", pd.DataFrame(alerts))
     else:
-        st.markdown('<div class="runjin-note">Risk desk clear: no stop condition is triggered in the current sample simulation.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="runjin-note">Risk desk clear: no stop condition is triggered in the current live-data simulation.</div>', unsafe_allow_html=True)
 
     named_table("Top long-term candidates", scored[["ticker", "company", "tags", "score_label", "bucket", "growth_evidence"]].head(8))
 
@@ -754,7 +754,7 @@ def page_kline_lab(prices, forecasts, data_mode):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def page_short_bot(prices, crypto, risk_rules, paper_trades):
+def page_short_bot(prices, crypto, risk_rules):
     page_header(
         "Short Book / Small Cashflow Engine",
         "短线模拟机器人",
@@ -796,7 +796,6 @@ def page_short_bot(prices, crypto, risk_rules, paper_trades):
     )
 
     named_table("Recent strategy trades", trades)
-    named_table("Sample paper trade ledger", paper_trades)
 
 
 def page_weekly_report(prices, crypto, scored, risk_rules):
@@ -831,24 +830,18 @@ def main():
     )
     data_mode_label = st.sidebar.radio(
         "Data mode",
-        ["Live auto", "Sample only"],
+        ["Live data"],
         index=0,
-        help="Live auto tries real sources first and falls back to bundled sample data.",
+        help="Live data uses current market sources and does not silently fall back to bundled samples.",
     )
     data_mode = {
-        "Live auto": "live_auto",
-        "Sample only": "sample",
+        "Live data": "live",
     }[data_mode_label]
     try:
-        prices, crypto, financials, scored, forecasts, paper_trades, risk_rules, source_status = load_all_data(data_mode)
+        prices, crypto, financials, scored, forecasts, risk_rules, source_status = load_all_data(data_mode)
     except Exception as exc:
-        st.sidebar.warning("Live data failed; switched to sample mode.")
-        prices, crypto, financials, scored, forecasts, paper_trades, risk_rules, source_status = load_all_data("sample")
-        source_status["runtime_fallback"] = {
-            "mode": "sample",
-            "source": "app_guard",
-            "message": f"UI fallback after live load error: {exc}",
-        }
+        st.sidebar.error(f"Live data failed: {exc}")
+        st.stop()
     page = st.sidebar.radio(
         "Workspace",
         ["Dashboard", "Long Watchlist", "Stock Detail", "K-line Lab", "Short Bot", "Weekly Report"],
@@ -865,7 +858,7 @@ def main():
     elif page == "K-line Lab":
         page_kline_lab(prices, forecasts, data_mode)
     elif page == "Short Bot":
-        page_short_bot(prices, crypto, risk_rules, paper_trades)
+        page_short_bot(prices, crypto, risk_rules)
     elif page == "Weekly Report":
         page_weekly_report(prices, crypto, scored, risk_rules)
 

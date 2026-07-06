@@ -61,6 +61,55 @@ def fetch_yfinance_prices(tickers, period="max", interval="1d"):
     return prices[["date", "ticker", "open", "high", "low", "close", "volume"]].dropna()
 
 
+def fetch_yfinance_financials(tickers):
+    try:
+        import yfinance as yf
+    except ImportError as exc:
+        raise LiveSourceError("yfinance is not installed") from exc
+
+    frames = []
+    for ticker in tickers:
+        try:
+            yf_ticker = yf.Ticker(ticker)
+            income = yf_ticker.quarterly_financials.T
+            cashflow = yf_ticker.quarterly_cashflow.T
+        except Exception as exc:
+            raise LiveSourceError(f"yfinance financials request failed for {ticker}") from exc
+        if income.empty:
+            continue
+
+        data = pd.DataFrame(index=income.index)
+        data["ticker"] = ticker
+        data["revenue"] = income.get("Total Revenue")
+        data["gross_profit"] = income.get("Gross Profit")
+        data["net_income"] = income.get("Net Income")
+        data["operating_cash_flow"] = cashflow.get("Operating Cash Flow") if not cashflow.empty else None
+        data = data.sort_index()
+        data["quarter"] = pd.to_datetime(data.index).tz_localize(None)
+        data["revenue_growth_yoy"] = data["revenue"].pct_change(periods=4)
+        data["gross_margin"] = data["gross_profit"] / data["revenue"]
+        data["operating_cash_flow_margin"] = data["operating_cash_flow"] / data["revenue"]
+        data["net_income_margin"] = data["net_income"] / data["revenue"]
+        data["guide_change"] = "live"
+        frames.append(
+            data[
+                [
+                    "quarter",
+                    "ticker",
+                    "revenue_growth_yoy",
+                    "gross_margin",
+                    "operating_cash_flow_margin",
+                    "net_income_margin",
+                    "guide_change",
+                ]
+            ]
+        )
+
+    if not frames:
+        raise LiveSourceError("yfinance returned no quarterly financial rows")
+    return pd.concat(frames, ignore_index=True).dropna(subset=["quarter", "ticker"])
+
+
 def fetch_binance_hourly(symbol_map, limit=1000):
     frames = []
     for app_symbol, exchange_symbol in symbol_map.items():

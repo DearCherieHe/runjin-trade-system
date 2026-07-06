@@ -1,6 +1,6 @@
 mode:
-  default: live_auto
-  fallback: sample
+  default: live
+  fallback: none
 free_sources:
   us_equities:
     primary: yfinance
@@ -20,6 +20,9 @@ free_sources:
   filings:
     primary: sec_edgar
     note: "Official SEC EDGAR APIs for filings and company facts."
+  fundamentals:
+    primary: yfinance
+    note: "Quarterly financial statements from Yahoo Finance; used for current dashboard fundamentals."
 paid_upgrade_path:
   broker_api:
     - tiger_openapi

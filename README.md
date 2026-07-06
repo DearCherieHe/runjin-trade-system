@@ -1,16 +1,15 @@
 # RunJin Trade System
 
-润金交易系统 is an offline-first Streamlit demo for a long-term stock observation desk and a short-term paper-trading lab.
+润金交易系统 is a live-data Streamlit research cockpit for a long-term stock observation desk and a short-term paper-trading lab.
 
 ## Quick Start
 
 ```bash
-python3 scripts/build_sample_data.py
 python3 -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-If dependencies are already installed, the app runs fully from `data/sample` and does not need network access.
+The app starts in live-data mode and requires network access for current market data. Bundled files under `data/sample` remain only for local validation and development checks.
 
 In this Codex desktop environment, the bundled Python can run the data generator and validator:
 
@@ -21,17 +20,15 @@ In this Codex desktop environment, the bundled Python can run the data generator
 
 The bundled Python does not include Streamlit, so install `requirements.txt` in the Python environment you want to use for the UI.
 
-## Data Modes
+## Data Mode
 
-The sidebar supports:
-
-- `Live auto`: try live/near-live sources first, then fall back to sample data.
-- `Sample only`: fully offline demo mode.
+The sidebar now uses `Live data` only. Live source failures are shown directly in the UI instead of silently falling back to old sample data.
 
 Current live adapters:
 
 - US equities: `yfinance`
 - Crypto: Binance public REST klines, then `yfinance` crypto fallback
+- Quarterly fundamentals: `yfinance`
 - Optional China market candidates: `finshare`, `opendatatools`, `tushare`
 - Broker placeholder: Tiger OpenAPI / `tigeropen`
 
@@ -58,4 +55,4 @@ The Stock Detail and K-line Lab pages support:
 - No real brokerage integration.
 - No exchange API keys.
 - No leverage.
-- Kronos-style forecast is a research-only sample adapter in V0.1.
+- Local sample forecasts are disabled while the app is running in live-data mode.

@@ -5,6 +5,7 @@ import pandas as pd
 from src.data_sources.live_sources import (
     fetch_binance_hourly,
     fetch_yfinance_crypto_hourly,
+    fetch_yfinance_financials,
     fetch_yfinance_prices,
     tiger_openapi_status,
 )
@@ -14,9 +15,10 @@ ROOT = Path(__file__).resolve().parents[2]
 SAMPLE_DIR = ROOT / "data" / "sample"
 CONFIG_DIR = ROOT / "configs"
 SOURCE_STATUS = {
-    "us_equities": {"mode": "sample", "source": "sample", "message": "Offline sample data"},
-    "crypto": {"mode": "sample", "source": "sample", "message": "Offline sample data"},
-    "financials": {"mode": "sample", "source": "sample", "message": "Quarterly sample fundamentals"},
+    "us_equities": {"mode": "live_pending", "source": "yfinance", "message": "Waiting for live market data"},
+    "crypto": {"mode": "live_pending", "source": "binance_public_rest", "message": "Waiting for live crypto data"},
+    "financials": {"mode": "live_pending", "source": "yfinance", "message": "Waiting for live quarterly fundamentals"},
+    "forecast": {"mode": "disabled", "source": "none", "message": "Local sample forecast disabled in live mode"},
     "china_market": {"mode": "candidate", "source": "finshare/opendatatools/tushare", "message": "Optional adapters registered"},
     "broker": {"mode": "placeholder", "source": "tiger_openapi", "message": "Waiting for Tiger credentials"},
 }
@@ -100,7 +102,7 @@ def get_data_source_status() -> dict:
 
 
 def _normalize_mode(data_mode):
-    return data_mode or "sample"
+    return data_mode or "live"
 
 
 def _sample_prices() -> pd.DataFrame:
@@ -178,7 +180,28 @@ def load_crypto_prices(data_mode=None) -> pd.DataFrame:
     return _sample_crypto_prices()
 
 
-def load_financials() -> pd.DataFrame:
+def load_financials(data_mode=None) -> pd.DataFrame:
+    mode = _normalize_mode(data_mode)
+    if mode in {"live", "live_auto"}:
+        tickers = [item["ticker"] for item in load_watchlist_config()["watchlist"]]
+        try:
+            df = fetch_yfinance_financials(tickers)
+            SOURCE_STATUS["financials"] = {
+                "mode": mode,
+                "source": "yfinance",
+                "message": "Live quarterly fundamentals from Yahoo Finance",
+            }
+            return df.sort_values(["ticker", "quarter"]).reset_index(drop=True)
+        except Exception as exc:
+            if mode == "live":
+                raise
+            SOURCE_STATUS["financials"] = {
+                "mode": "sample_fallback",
+                "source": "sample",
+                "message": f"Live fundamentals unavailable: {exc}",
+            }
+    else:
+        SOURCE_STATUS["financials"] = {"mode": "sample", "source": "sample", "message": "Quarterly sample fundamentals"}
     return pd.read_csv(SAMPLE_DIR / "financial_metrics.csv", parse_dates=["quarter"])
 
 
@@ -186,7 +209,15 @@ def load_watchlist_notes() -> pd.DataFrame:
     return pd.read_csv(SAMPLE_DIR / "watchlist_notes.csv")
 
 
-def load_kronos_forecast() -> pd.DataFrame:
+def load_kronos_forecast(data_mode=None) -> pd.DataFrame:
+    mode = _normalize_mode(data_mode)
+    if mode in {"live", "live_auto"}:
+        SOURCE_STATUS["forecast"] = {
+            "mode": "disabled",
+            "source": "none",
+            "message": "Local sample forecast disabled while the app runs on live data",
+        }
+        return pd.DataFrame(columns=["date", "ticker", "predicted_close", "lower_band", "upper_band"])
     return pd.read_csv(SAMPLE_DIR / "kronos_forecast_sample.csv", parse_dates=["date"])
 
 

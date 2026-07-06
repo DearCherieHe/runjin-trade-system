@@ -27,9 +27,9 @@ def assert_true(condition, message):
 def main():
     watchlist = load_watchlist_config()["watchlist"]
     tickers = [item["ticker"] for item in watchlist]
-    prices = load_prices()
-    crypto = load_crypto_prices()
-    financials = load_financials()
+    prices = load_prices(data_mode="sample")
+    crypto = load_crypto_prices(data_mode="sample")
+    financials = load_financials(data_mode="sample")
     notes = load_watchlist_notes()
     risk_rules = load_risk_rules()
     scored = build_score_table(notes)
