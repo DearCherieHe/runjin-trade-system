@@ -60,6 +60,9 @@ def main():
         market_universe.drop(columns=["market_group"]).head(1)
     )
     assert_true("market_group" in repaired_universe.columns, "Market universe repair did not create market_group")
+    strict_universe = load_market_universe(data_mode="live")
+    assert_true(not strict_universe.empty, "Live strict market universe should load configured listing CSVs")
+    assert_true(not (strict_universe["source"] == "seed_universe").all(), "Live strict market universe should not depend only on seed universe")
 
     for ticker in tickers:
         assert_true(not prices.loc[prices["ticker"] == ticker].empty, f"Missing price rows for {ticker}")

@@ -97,11 +97,11 @@ def _fallback_live_sources() -> dict:
                 "top_symbols_per_market": 3000,
                 "fx_to_usd": {"USD": 1.0, "CNY": 0.14, "HKD": 0.128, "SGD": 0.74},
                 "markets": {
-                    "US": {"exchange": "NYSE/Nasdaq/AMEX", "currency": "USD", "listing_csv": ""},
-                    "A_SHARE_SH": {"exchange": "SSE", "currency": "CNY", "listing_csv": ""},
-                    "A_SHARE_SZ": {"exchange": "SZSE", "currency": "CNY", "listing_csv": ""},
-                    "HK": {"exchange": "HKEX", "currency": "HKD", "listing_csv": ""},
-                    "SG": {"exchange": "SGX", "currency": "SGD", "listing_csv": ""},
+                    "US": {"exchange": "NYSE/Nasdaq/AMEX", "currency": "USD", "listing_csv": "data/listings/us_listings.csv"},
+                    "A_SHARE_SH": {"exchange": "SSE", "currency": "CNY", "listing_csv": "data/listings/a_share_sh_listings.csv"},
+                    "A_SHARE_SZ": {"exchange": "SZSE", "currency": "CNY", "listing_csv": "data/listings/a_share_sz_listings.csv"},
+                    "HK": {"exchange": "HKEX", "currency": "HKD", "listing_csv": "data/listings/hk_listings.csv"},
+                    "SG": {"exchange": "SGX", "currency": "SGD", "listing_csv": "data/listings/sg_listings.csv"},
                 },
             },
             "crypto": {"symbols": {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}},
@@ -245,10 +245,13 @@ def load_market_universe(data_mode=None) -> pd.DataFrame:
     try:
         df = build_market_universe(config, ROOT, data_mode=mode)
         source = "configured_listings" if not df.empty and not (df["source"] == "seed_universe").all() else "seed_universe"
+        message = "US, A-share, HK, and SG universe filtered at USD 300M market cap and top 3000 per market"
+        if source == "seed_universe" and mode == "live":
+            message = "Live strict has no configured listing CSV; using built-in seed universe so the workspace can start"
         SOURCE_STATUS["market_universe"] = {
             "mode": mode if source != "seed_universe" else "sample_seed",
             "source": source,
-            "message": "US, A-share, HK, and SG universe filtered at USD 300M market cap and top 3000 per market",
+            "message": message,
         }
         return df
     except Exception as exc:

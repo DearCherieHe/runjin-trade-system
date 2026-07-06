@@ -49,9 +49,16 @@ Universe rule:
 - Select the top 3,000 symbols per market group by USD market cap after the micro-cap filter.
 - Preserve `market_group`, `market`, `exchange`, `currency`, `market_cap_usd`, `market_rank`, and Yahoo-compatible ticker fields for filtering and chart selection.
 
-Configure full exchange listing exports in `configs/live_sources.yaml` under `free_sources.market_universe.markets.*.listing_csv`.
+Baseline exchange listing CSVs are committed under `data/listings/` and configured in `configs/live_sources.yaml` under `free_sources.market_universe.markets.*.listing_csv`.
 Each CSV can use English or common Chinese column names for ticker, company/name, exchange, currency, market cap, and USD market cap.
-If no full listing CSV is configured, `Live auto` and `Sample only` use a small seeded universe so the UI and validation keep running; `Live strict` fails instead of pretending the universe is complete.
+If a full provider export is not available yet, the committed baseline CSVs keep `Live auto`, `Live strict`, and Streamlit Cloud startup stable. If all configured CSVs are removed or unavailable, the app still falls back to a small seed universe and marks the source status accordingly.
+
+Validate or optionally refresh the configured listing CSVs:
+
+```bash
+python3 scripts/refresh_market_listings.py
+python3 scripts/refresh_market_listings.py --yfinance-us
+```
 
 Check source availability:
 

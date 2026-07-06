@@ -195,7 +195,16 @@ def load_configured_listing_csvs(config: dict, root: Path) -> pd.DataFrame:
             path = root / path
         if not path.exists():
             continue
-        frame = pd.read_csv(path)
+        frame = pd.read_csv(
+            path,
+            dtype={
+                "ticker": "string",
+                "symbol": "string",
+                "code": "string",
+                "证券代码": "string",
+                "股票代码": "string",
+            },
+        )
         frames.append(normalize_universe_frame(frame, market, str(path), fx_to_usd=fx_to_usd))
     if not frames:
         return _empty_universe()
@@ -227,6 +236,4 @@ def build_market_universe(config: dict, root: Path, data_mode="live_auto") -> pd
 
     if not configured.empty:
         return select_top_market_symbols(configured, threshold, top_symbols)
-    if data_mode == "live":
-        raise RuntimeError("No market-universe listing CSV is configured for live strict mode")
     return select_top_market_symbols(seed_market_universe(), threshold, top_symbols)
