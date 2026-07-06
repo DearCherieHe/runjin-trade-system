@@ -4,16 +4,19 @@ import pandas as pd
 
 
 MIN_MARKET_CAP_USD = 300_000_000
+TOP_SYMBOLS_PER_MARKET = 3_000
 
 UNIVERSE_COLUMNS = [
     "ticker",
     "yahoo_ticker",
     "company",
+    "market_group",
     "market",
     "exchange",
     "currency",
     "market_cap_local",
     "market_cap_usd",
+    "market_rank",
     "source",
 ]
 
@@ -25,11 +28,11 @@ DEFAULT_FX_TO_USD = {
 }
 
 MARKET_DEFINITIONS = {
-    "US": {"exchange": "NYSE/Nasdaq/AMEX", "currency": "USD", "suffix": ""},
-    "A_SHARE_SH": {"exchange": "SSE", "currency": "CNY", "suffix": ".SS"},
-    "A_SHARE_SZ": {"exchange": "SZSE", "currency": "CNY", "suffix": ".SZ"},
-    "HK": {"exchange": "HKEX", "currency": "HKD", "suffix": ".HK"},
-    "SG": {"exchange": "SGX", "currency": "SGD", "suffix": ".SI"},
+    "US": {"market_group": "US", "exchange": "NYSE/Nasdaq/AMEX", "currency": "USD", "suffix": ""},
+    "A_SHARE_SH": {"market_group": "A_SHARE", "exchange": "SSE", "currency": "CNY", "suffix": ".SS"},
+    "A_SHARE_SZ": {"market_group": "A_SHARE", "exchange": "SZSE", "currency": "CNY", "suffix": ".SZ"},
+    "HK": {"market_group": "HK", "exchange": "HKEX", "currency": "HKD", "suffix": ".HK"},
+    "SG": {"market_group": "SG", "exchange": "SGX", "currency": "SGD", "suffix": ".SI"},
 }
 
 
@@ -80,11 +83,13 @@ def seed_market_universe() -> pd.DataFrame:
                 "ticker": _normalize_ticker(ticker),
                 "yahoo_ticker": _yahoo_ticker(ticker, suffix),
                 "company": company,
+                "market_group": MARKET_DEFINITIONS[market]["market_group"],
                 "market": market,
                 "exchange": exchange,
                 "currency": currency,
                 "market_cap_local": float(market_cap_local),
                 "market_cap_usd": float(market_cap_local) * DEFAULT_FX_TO_USD[currency],
+                "market_rank": None,
                 "source": "seed_universe",
             }
         )
@@ -100,15 +105,18 @@ def normalize_universe_frame(df: pd.DataFrame, market: str, source: str, fx_to_u
     exchange = definition.get("exchange", market)
     currency = definition.get("currency", "USD")
     suffix = definition.get("suffix", "")
+    market_group = definition.get("market_group", market)
 
     aliases = {
         "ticker": ["ticker", "symbol", "code", "证券代码", "股票代码"],
         "yahoo_ticker": ["yahoo_ticker", "yahoo_symbol"],
         "company": ["company", "name", "short_name", "证券简称", "股票简称"],
+        "market_group": ["market_group", "market_bucket", "市场分组"],
         "exchange": ["exchange", "交易所"],
         "currency": ["currency", "币种"],
         "market_cap_local": ["market_cap_local", "market_cap", "total_market_cap", "市值", "总市值"],
         "market_cap_usd": ["market_cap_usd", "市值USD"],
+        "market_rank": ["market_rank", "rank", "市值排名"],
     }
     lower_lookup = {str(col).lower(): col for col in df.columns}
 
@@ -130,6 +138,7 @@ def normalize_universe_frame(df: pd.DataFrame, market: str, source: str, fx_to_u
     else:
         result["yahoo_ticker"] = yahoo_series.map(_normalize_ticker)
     result["company"] = pick("company", result["ticker"]).fillna(result["ticker"]).astype(str)
+    result["market_group"] = pick("market_group", market_group)
     result["market"] = market
     result["exchange"] = pick("exchange", exchange)
     result["currency"] = pick("currency", currency)
@@ -145,6 +154,8 @@ def normalize_universe_frame(df: pd.DataFrame, market: str, source: str, fx_to_u
     else:
         result["market_cap_usd"] = market_cap_usd
         result["market_cap_local"] = market_cap_local if not market_cap_local.empty else market_cap_usd
+    market_rank = pick("market_rank")
+    result["market_rank"] = pd.to_numeric(market_rank, errors="coerce") if market_rank is not None else None
     result["source"] = source
     return result[UNIVERSE_COLUMNS].dropna(subset=["ticker", "yahoo_ticker"])
 
@@ -168,22 +179,33 @@ def load_configured_listing_csvs(config: dict, root: Path) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def filter_market_cap(df: pd.DataFrame, min_market_cap_usd=MIN_MARKET_CAP_USD) -> pd.DataFrame:
+def select_top_market_symbols(
+    df: pd.DataFrame,
+    min_market_cap_usd=MIN_MARKET_CAP_USD,
+    top_symbols_per_market=TOP_SYMBOLS_PER_MARKET,
+) -> pd.DataFrame:
     if df.empty:
         return df
     result = df.copy()
+    if "market_group" not in result.columns:
+        result["market_group"] = result["market"]
     result["market_cap_usd"] = pd.to_numeric(result["market_cap_usd"], errors="coerce")
     result = result.loc[result["market_cap_usd"] >= float(min_market_cap_usd)]
-    return result.sort_values(["market", "market_cap_usd"], ascending=[True, False]).reset_index(drop=True)
+    result = result.sort_values(["market_group", "market_cap_usd"], ascending=[True, False]).reset_index(drop=True)
+    result["market_rank"] = result.groupby("market_group").cumcount() + 1
+    if top_symbols_per_market:
+        result = result.loc[result["market_rank"] <= int(top_symbols_per_market)]
+    return result.sort_values(["market_group", "market_rank"]).reset_index(drop=True)
 
 
 def build_market_universe(config: dict, root: Path, data_mode="live_auto") -> pd.DataFrame:
     universe_config = config.get("market_universe") or config.get("free_sources", {}).get("market_universe", {})
     threshold = universe_config.get("min_market_cap_usd", MIN_MARKET_CAP_USD)
+    top_symbols = universe_config.get("top_symbols_per_market", TOP_SYMBOLS_PER_MARKET)
     configured = load_configured_listing_csvs(universe_config, root)
 
     if not configured.empty:
-        return filter_market_cap(configured, threshold)
+        return select_top_market_symbols(configured, threshold, top_symbols)
     if data_mode == "live":
         raise RuntimeError("No market-universe listing CSV is configured for live strict mode")
-    return filter_market_cap(seed_market_universe(), threshold)
+    return select_top_market_symbols(seed_market_universe(), threshold, top_symbols)

@@ -7,6 +7,7 @@ free_sources:
     note: "Unofficial Yahoo Finance access; useful for research dashboards, not low-latency execution."
   market_universe:
     min_market_cap_usd: 300000000
+    top_symbols_per_market: 3000
     fx_to_usd:
       USD: 1.0
       CNY: 0.14

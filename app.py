@@ -704,17 +704,17 @@ def page_market_universe(market_universe):
         & market_universe["currency"].isin(selected_currencies)
         & (market_universe["market_cap_usd"] >= min_cap)
     ].copy()
-    market_counts = view.groupby("market", as_index=False)["ticker"].count().rename(columns={"ticker": "count"})
-    cap_by_market = view.groupby("market", as_index=False)["market_cap_usd"].sum()
+    market_counts = view.groupby("market_group", as_index=False)["ticker"].count().rename(columns={"ticker": "count"})
+    cap_by_market = view.groupby("market_group", as_index=False)["market_cap_usd"].sum()
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Symbols", fmt_int(len(view)))
-    c2.metric("Markets", fmt_int(view["market"].nunique()))
+    c2.metric("Markets", fmt_int(view["market_group"].nunique()))
     c3.metric("Exchanges", fmt_int(view["exchange"].nunique()))
     c4.metric("Median cap", f"${fmt_int(view['market_cap_usd'].median())}" if not view.empty else "$0")
 
     if not market_counts.empty:
-        fig = go.Figure(go.Bar(x=market_counts["market"], y=market_counts["count"], marker_color="#2ed17c"))
+        fig = go.Figure(go.Bar(x=market_counts["market_group"], y=market_counts["count"], marker_color="#2ed17c"))
         fig.update_layout(title="Universe count by market", yaxis_title="Symbols")
         style_figure(fig, 320)
         st.plotly_chart(fig, use_container_width=True)
@@ -727,6 +727,8 @@ def page_market_universe(market_universe):
             "ticker",
             "yahoo_ticker",
             "company",
+            "market_group",
+            "market_rank",
             "market",
             "exchange",
             "currency",

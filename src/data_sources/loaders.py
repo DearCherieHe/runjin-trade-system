@@ -94,6 +94,7 @@ def _fallback_live_sources() -> dict:
         "free_sources": {
             "market_universe": {
                 "min_market_cap_usd": 300000000,
+                "top_symbols_per_market": 3000,
                 "fx_to_usd": {"USD": 1.0, "CNY": 0.14, "HKD": 0.128, "SGD": 0.74},
                 "markets": {
                     "US": {"exchange": "NYSE/Nasdaq/AMEX", "currency": "USD", "listing_csv": ""},
@@ -247,7 +248,7 @@ def load_market_universe(data_mode=None) -> pd.DataFrame:
         SOURCE_STATUS["market_universe"] = {
             "mode": mode if source != "seed_universe" else "sample_seed",
             "source": source,
-            "message": "US, A-share, HK, and SG universe filtered at USD 300M market cap",
+            "message": "US, A-share, HK, and SG universe filtered at USD 300M market cap and top 3000 per market",
         }
         return df
     except Exception as exc:

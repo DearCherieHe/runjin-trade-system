@@ -45,11 +45,14 @@ def main():
     risk_rules = load_risk_rules()
     scored = build_score_table(notes)
 
-    required_universe_cols = ["ticker", "yahoo_ticker", "market", "exchange", "currency", "market_cap_usd"]
+    required_universe_cols = ["ticker", "yahoo_ticker", "market_group", "market", "exchange", "currency", "market_cap_usd", "market_rank"]
     for col in required_universe_cols:
         assert_true(col in market_universe.columns, f"Market universe missing {col}")
     assert_true({"US", "A_SHARE_SH", "A_SHARE_SZ", "HK", "SG"}.issubset(set(market_universe["market"])), "Market universe missing required markets")
+    assert_true({"US", "A_SHARE", "HK", "SG"}.issubset(set(market_universe["market_group"])), "Market universe missing required market groups")
     assert_true((market_universe["market_cap_usd"] >= 300_000_000).all(), "Market universe includes micro caps below USD 300M")
+    assert_true((market_universe.groupby("market_group")["ticker"].count() <= 3000).all(), "Market universe exceeds top 3000 per market")
+    assert_true((market_universe["market_rank"] <= 3000).all(), "Market universe rank exceeds 3000")
 
     for ticker in tickers:
         assert_true(not prices.loc[prices["ticker"] == ticker].empty, f"Missing price rows for {ticker}")

@@ -46,7 +46,8 @@ Universe rule:
 
 - Include US stocks, A-shares, Hong Kong stocks, and Singapore stocks.
 - Exclude symbols with market cap below USD 300M equivalent.
-- Preserve `market`, `exchange`, `currency`, `market_cap_usd`, and Yahoo-compatible ticker fields for filtering and chart selection.
+- Select the top 3,000 symbols per market group by USD market cap after the micro-cap filter.
+- Preserve `market_group`, `market`, `exchange`, `currency`, `market_cap_usd`, `market_rank`, and Yahoo-compatible ticker fields for filtering and chart selection.
 
 Configure full exchange listing exports in `configs/live_sources.yaml` under `free_sources.market_universe.markets.*.listing_csv`.
 Each CSV can use English or common Chinese column names for ticker, company/name, exchange, currency, market cap, and USD market cap.
