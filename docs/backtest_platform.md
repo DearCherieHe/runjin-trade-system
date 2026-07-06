@@ -22,6 +22,7 @@ RunJin does not install every mature backtesting framework into one Streamlit ap
 | `QuantResearch` | Research workflow mindset: factors, risk, VaR, regimes, notebooks, and experiment history. |
 | `bt` | Portfolio allocation, rebalancing, reusable strategy blocks, comparison-oriented reporting. |
 | `Gekko BacktestTool` | Crypto-bot oriented rapid iteration and parameter testing, without connecting real exchange keys. |
+| `ABU / abupy` | Factor, position, slippage, commission, metrics, and裁判 boundaries, reimplemented without copying GPL source. |
 
 ## Portfolio Templates
 
@@ -73,10 +74,29 @@ commission_pct: 0.10
 position_size: 0.95
 stop_loss_pct: 6
 take_profit_pct: 0
+commission_model: us_equity_basic
+slippage_model: hl_mean_gap_guard
+position_model: atr_risk
+benchmark: SPY
+risk_judge:
+  enabled: true
+  max_volatility: 0.75
+  max_drawdown: 0.12
 parameters:
   fast_window: 20
   slow_window: 60
 ```
+
+## ABU-style Research Layer
+
+The ABU-inspired layer adds execution assumptions and risk review without turning the app into a live trading engine:
+
+- Cost models: `pct_only`, `us_equity_basic`, `a_share_basic`, `hk_equity_basic`, `crypto_basic`.
+- Slippage models: `close`, `hl_mean`, `hl_mean_gap_guard`.
+- Position models: `fixed_fraction`, `atr_risk`, `kelly_lite`.
+- UMP-lite verdicts: `allow`, `review`, `block`.
+
+K-line Lab also includes research-only gap, ATR, rolling-correlation, and similar-path diagnostics.
 
 ## Upgrade Path
 

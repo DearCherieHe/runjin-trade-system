@@ -6,14 +6,27 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.backtest_lab.costs import describe_execution_assumptions, resolve_commission_rate, slippage_reference
+from src.backtest_lab.metrics import abu_style_metrics, metrics_detail_frame
+from src.backtest_lab.position_sizing import resolve_position_size
+from src.backtest_lab.ump_lite import evaluate_ump_lite
+
 
 DEFAULT_STRATEGY_SPEC = """name: RunJin SMA trend test
 template: sma_crossover
 cash: 100000
 commission_pct: 0.10
+commission_model: us_equity_basic
+slippage_model: hl_mean_gap_guard
+position_model: fixed_fraction
+benchmark: SPY
 position_size: 0.95
 stop_loss_pct: 6
 take_profit_pct: 0
+risk_judge:
+  enabled: true
+  max_volatility: 0.75
+  max_drawdown: 0.12
 parameters:
   fast_window: 20
   slow_window: 60
@@ -165,6 +178,10 @@ class BacktestResult:
     trades: pd.DataFrame
     data: pd.DataFrame
     warnings: list[str]
+    assumptions: pd.DataFrame | None = None
+    metrics_detail: pd.DataFrame | None = None
+    ump_verdict: pd.DataFrame | None = None
+    slippage_detail: pd.DataFrame | None = None
 
 
 @dataclass
@@ -319,6 +336,17 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
     params = spec.get("parameters", {}) or {}
     if not isinstance(params, dict):
         raise ValueError("parameters must be a YAML object.")
+    risk_judge = spec.get("risk_judge", {}) or {}
+    if not isinstance(risk_judge, dict):
+        raise ValueError("risk_judge must be a YAML object.")
+
+    commission_model = str(spec.get("commission_model", "pct_only")).strip() or "pct_only"
+    slippage_model = str(spec.get("slippage_model", "close")).strip() or "close"
+    position_model = str(spec.get("position_model", "fixed_fraction")).strip() or "fixed_fraction"
+    benchmark = str(spec.get("benchmark", "")).strip()
+    position_parameters = spec.get("position_parameters", {}) or {}
+    if not isinstance(position_parameters, dict):
+        raise ValueError("position_parameters must be a YAML object.")
 
     max_window = _max_lookback(template, params)
     if bars < max_window + 20:
@@ -328,10 +356,16 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
         "name": str(spec.get("name", template)).strip() or template,
         "template": template,
         "cash": cash,
-        "commission": commission_pct / 100,
+        "commission": resolve_commission_rate(commission_model, commission_pct / 100),
+        "commission_model": commission_model,
+        "slippage_model": slippage_model,
+        "position_model": position_model,
+        "position_parameters": position_parameters,
+        "benchmark": benchmark,
         "position_size": position_size,
         "stop_loss_pct": stop_loss_pct / 100,
         "take_profit_pct": take_profit_pct / 100,
+        "risk_judge": risk_judge,
         "parameters": params,
     }
     return normalized, warnings
@@ -353,6 +387,8 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
     spec = load_strategy_spec(raw_spec)
     normalized, warnings = validate_strategy_spec(spec, len(data))
     params = normalized["parameters"]
+    normalized["position_size"] = resolve_position_size(raw_data, normalized, warnings)
+    slippage_detail = slippage_reference(raw_data, normalized["slippage_model"]).tail(20)
 
     class RunJinStrategy(Strategy):
         fast_window = int(params.get("fast_window", 20))
@@ -419,6 +455,9 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
     equity_curve = stats["_equity_curve"].reset_index()
     trades = stats["_trades"].copy()
     summary = _stats_to_dict(stats)
+    metrics_detail = abu_style_metrics(equity_curve, trades, data.reset_index())
+    summary.update({f"ABU {key}": value for key, value in metrics_detail.items() if value is not None})
+    ump_verdict = evaluate_ump_lite(raw_data, equity_curve, trades, normalized["risk_judge"])
     return BacktestResult(
         name=normalized["name"],
         template=normalized["template"],
@@ -427,6 +466,15 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
         trades=trades,
         data=data.reset_index(),
         warnings=warnings,
+        assumptions=describe_execution_assumptions(
+            normalized["commission_model"],
+            normalized["slippage_model"],
+            normalized["position_model"],
+            normalized["benchmark"],
+        ),
+        metrics_detail=metrics_detail_frame(metrics_detail),
+        ump_verdict=pd.DataFrame({"verdict": [ump_verdict.verdict] * len(ump_verdict.reasons), "reason": ump_verdict.reasons}),
+        slippage_detail=slippage_detail,
     )
 
 

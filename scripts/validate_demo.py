@@ -25,6 +25,10 @@ from src.backtest_lab.engine import (
     run_strategy_backtest,
     validate_strategy_spec,
 )
+from src.backtest_lab.costs import estimate_commission, slippage_reference
+from src.backtest_lab.position_sizing import atr_position_size
+from src.backtest_lab.ump_lite import evaluate_ump_lite
+from src.kline.abu_research import atr_research, gap_analysis, rolling_correlation_matrix, similar_paths
 from src.kline.indicators import add_indicators
 from src.long_term.scoring import SCORE_COLUMNS, build_score_table
 from src.quant_bot.paper_trader import run_crypto_paper, run_us_stock_paper
@@ -103,9 +107,27 @@ def main():
     normalized_spec, warnings = validate_strategy_spec(strategy_spec, len(prepared))
     assert_true(not prepared.empty, "Backtest OHLCV preparation returned no rows")
     assert_true(normalized_spec["template"] == "sma_crossover", "Backtest strategy spec did not normalize")
+    assert_true(normalized_spec["commission_model"] == "us_equity_basic", "ABU-style commission model did not normalize")
+    legacy_spec, _ = validate_strategy_spec(load_strategy_spec("template: sma_crossover\nparameters:\n  fast_window: 5\n  slow_window: 10\n"), len(prepared))
+    assert_true(legacy_spec["position_model"] == "fixed_fraction", "Legacy strategy YAML should keep default position model")
+    for model_name in ["us_equity_basic", "a_share_basic", "hk_equity_basic", "crypto_basic"]:
+        assert_true(estimate_commission(model_name, 10000) >= 0, f"Commission model {model_name} returned negative cost")
+    nvda_raw = prices.loc[prices["ticker"] == "NVDA"].copy()
+    atr_size = atr_position_size(nvda_raw, 0.25)
+    assert_true(0 <= atr_size <= 0.25, "ATR position sizing breached max position cap")
+    slipped = slippage_reference(nvda_raw, "hl_mean_gap_guard")
+    assert_true("execution_reference" in slipped.columns, "Slippage reference missing execution price")
+    abnormal = nvda_raw.copy()
+    abnormal.loc[abnormal.index[-1], "open"] = abnormal["close"].iloc[-2] * 1.25
+    abnormal.loc[abnormal.index[-1], "low"] = abnormal["close"].iloc[-2] * 1.20
+    abnormal.loc[abnormal.index[-1], "high"] = abnormal["close"].iloc[-2] * 1.30
+    assert_true(slippage_reference(abnormal, "hl_mean_gap_guard", 0.08)["gap_guard_flag"].tail(1).iloc[0], "Gap guard did not flag abnormal gap")
     try:
         backtest_result = run_strategy_backtest(prices.loc[prices["ticker"] == "NVDA"].copy(), "date", DEFAULT_STRATEGY_SPEC)
         assert_true("Return [%]" in backtest_result.stats, "Backtest stats missing return")
+        assert_true(backtest_result.assumptions is not None and not backtest_result.assumptions.empty, "Execution assumptions missing")
+        assert_true(backtest_result.metrics_detail is not None and not backtest_result.metrics_detail.empty, "ABU-style metrics missing")
+        assert_true(backtest_result.ump_verdict is not None and not backtest_result.ump_verdict.empty, "UMP-lite verdict missing")
     except BacktestEngineUnavailable:
         pass
     portfolio_result = run_portfolio_backtest(prices, DEFAULT_PORTFOLIO_SPEC)
@@ -117,6 +139,17 @@ def main():
     stressed["drawdown"] = stressed["equity"] / stressed["equity"].cummax() - 1
     status, reason = evaluate_risk(stressed, risk_rules)
     assert_true(status == "STOP", f"Risk stress did not stop bot: {reason}")
+    ump = evaluate_ump_lite(abnormal, stressed.rename(columns={"equity": "Equity"}), stock_trades, {"max_volatility": 0.01, "max_drawdown": 0.01, "max_gap_pct": 0.08})
+    assert_true(ump.verdict in {"review", "block"}, "UMP-lite did not flag stressed risk scenario")
+
+    gaps = gap_analysis(abnormal)
+    atr_view = atr_research(nvda_raw)
+    corr = rolling_correlation_matrix(prices, ["NVDA", "TSLA", "AMD"], 60)
+    similar = similar_paths(prices, "NVDA", ["TSLA", "AMD", "AVGO"], 60)
+    assert_true(not gaps.empty, "Gap analysis did not find injected abnormal gap")
+    assert_true(not atr_view.empty and atr_view["atr_pct"].notna().sum() > 0, "ATR research returned empty data")
+    assert_true(not corr.empty, "Rolling correlation matrix returned empty data")
+    assert_true(not similar.empty, "Similar path research returned empty data")
 
     report = build_weekly_report(
         scored,

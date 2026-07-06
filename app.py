@@ -27,6 +27,7 @@ from src.backtest_lab.engine import (
     run_strategy_backtest,
 )
 from src.kline.indicators import add_indicators, classify_regime, relative_strength
+from src.kline.abu_research import atr_research, gap_analysis, rolling_correlation_matrix, similar_paths
 from src.kline.timeframes import apply_asof, coverage_summary, resample_ohlcv
 from src.data_sources.live_sources import fetch_yfinance_prices
 from src.long_term.scoring import SCORE_COLUMNS, build_score_table
@@ -882,7 +883,7 @@ def page_kline_lab(prices, forecasts, market_universe, data_mode):
         "K-line Lab / Pattern Is Context",
         "K线解读台",
         "Indicators are treated as context, not prophecy. The Kronos-style line is a local research stub and remains visually separated from executable trading signals.",
-        ["MA20 / MA60", "RSI / MACD", "Research-only forecast"],
+        ["MA20 / MA60", "RSI / MACD", "ABU-style research"],
     )
     price_tickers = sorted(prices["ticker"].unique())
     universe_tickers = sorted(market_universe["yahoo_ticker"].dropna().unique()) if not market_universe.empty else []
@@ -957,6 +958,27 @@ def page_kline_lab(prices, forecasts, market_universe, data_mode):
         fig.update_layout(title=f"Relative Strength: {ticker} vs TSM")
         style_figure(fig, 320, time_axis=True)
         st.plotly_chart(fig, use_container_width=True)
+
+    section_label("ABU-style Research Context")
+    st.markdown(
+        '<div class="runjin-note">Gap, ATR, correlation, and similar-path diagnostics are research-only context rebuilt for RunJin. They do not create executable trading instructions.</div>',
+        unsafe_allow_html=True,
+    )
+    gap_view = gap_analysis(ticker_prices).tail(12)
+    atr_view = atr_research(ticker_prices).tail(30)
+    corr_candidates = [item for item in ["NVDA", "TSLA", "AMD", "AVGO", "TSM", "PLTR"] if item in set(prices["ticker"])]
+    corr_view = rolling_correlation_matrix(prices, corr_candidates, window=60)
+    similar_view = similar_paths(prices, ticker if ticker in set(prices["ticker"]) else "NVDA", corr_candidates, window=60)
+    col_gap, col_atr = st.columns(2)
+    with col_gap:
+        named_table("Gap signals", gap_view.round(4) if not gap_view.empty else pd.DataFrame([{"note": "No significant gaps in current window"}]))
+    with col_atr:
+        named_table("ATR research", atr_view[["date", "close", "atr21", "atr_pct"]].round(4) if not atr_view.empty else pd.DataFrame())
+    col_corr, col_similar = st.columns(2)
+    with col_corr:
+        named_table("Rolling correlation matrix", corr_view.round(3) if not corr_view.empty else pd.DataFrame([{"note": "Not enough overlapping symbols"}]))
+    with col_similar:
+        named_table("Similar recent paths", similar_view.round(3) if not similar_view.empty else pd.DataFrame([{"note": "Not enough comparable history"}]))
 
 
 def page_backtest_lab(prices, crypto):
@@ -1039,6 +1061,16 @@ def page_backtest_lab(prices, crypto):
         col4.metric("Win rate", fmt_number(stats.get("Win Rate [%]"), 1, "%"))
         col5.metric("Trades", fmt_int(stats.get("# Trades", 0) or 0))
 
+        if result.ump_verdict is not None and not result.ump_verdict.empty:
+            verdict = result.ump_verdict["verdict"].iloc[0]
+            st.markdown(
+                f'<div class="runjin-note">UMP-lite verdict: <strong>{verdict.upper()}</strong>. Rule-based裁判只做研究拦截提示，不自动下单。</div>',
+                unsafe_allow_html=True,
+            )
+            named_table("UMP-lite verdict", result.ump_verdict)
+        if result.assumptions is not None and not result.assumptions.empty:
+            named_table("Execution assumptions", result.assumptions)
+
         equity = result.equity_curve.copy()
         date_col = "Date" if "Date" in equity.columns else equity.columns[0]
         fig = go.Figure()
@@ -1060,6 +1092,11 @@ def page_backtest_lab(prices, crypto):
 
         summary = pd.DataFrame([{"metric": key, "value": value} for key, value in stats.items() if key not in {"Start", "End"}])
         named_table("Backtest statistics", summary)
+        if result.metrics_detail is not None and not result.metrics_detail.empty:
+            named_table("ABU-style metrics detail", result.metrics_detail)
+        if result.slippage_detail is not None and not result.slippage_detail.empty:
+            slippage_cols = [col for col in ["date", "close", "execution_reference", "gap_pct", "gap_guard_flag", "slippage_bps"] if col in result.slippage_detail.columns]
+            named_table("Slippage reference sample", result.slippage_detail[slippage_cols].round(4))
 
         trades = result.trades.copy()
         if not trades.empty:
