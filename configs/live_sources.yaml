@@ -1,6 +1,6 @@
 mode:
-  default: live
-  fallback: none
+  default: live_auto
+  fallback: sample
 free_sources:
   us_equities:
     primary: yfinance

@@ -830,17 +830,20 @@ def main():
     )
     data_mode_label = st.sidebar.radio(
         "Data mode",
-        ["Live data"],
+        ["Live auto", "Sample only", "Live strict"],
         index=0,
-        help="Live data uses current market sources and does not silently fall back to bundled samples.",
+        help="Live auto tries current market sources first and falls back to bundled samples when a public source is blocked or empty.",
     )
     data_mode = {
-        "Live data": "live",
+        "Live auto": "live_auto",
+        "Sample only": "sample",
+        "Live strict": "live",
     }[data_mode_label]
     try:
         prices, crypto, financials, scored, forecasts, risk_rules, source_status = load_all_data(data_mode)
     except Exception as exc:
-        st.sidebar.error(f"Live data failed: {exc}")
+        st.sidebar.error(f"Live strict failed: {exc}")
+        st.sidebar.caption("Switch to Live auto or Sample only to keep the workspace running when public data sources are unavailable.")
         st.stop()
     page = st.sidebar.radio(
         "Workspace",

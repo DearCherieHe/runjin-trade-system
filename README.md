@@ -1,6 +1,6 @@
 # RunJin Trade System
 
-润金交易系统 is a live-data Streamlit research cockpit for a long-term stock observation desk and a short-term paper-trading lab.
+润金交易系统 is a live-first Streamlit research cockpit for a long-term stock observation desk and a short-term paper-trading lab.
 
 ## Quick Start
 
@@ -9,7 +9,7 @@ python3 -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-The app starts in live-data mode and requires network access for current market data. Bundled files under `data/sample` remain only for local validation and development checks.
+The app starts in `Live auto` mode: it tries current market sources first, then falls back to bundled files under `data/sample` when public data endpoints are blocked, rate-limited, or empty.
 
 In this Codex desktop environment, the bundled Python can run the data generator and validator:
 
@@ -20,9 +20,13 @@ In this Codex desktop environment, the bundled Python can run the data generator
 
 The bundled Python does not include Streamlit, so install `requirements.txt` in the Python environment you want to use for the UI.
 
-## Data Mode
+## Data Modes
 
-The sidebar now uses `Live data` only. Live source failures are shown directly in the UI instead of silently falling back to old sample data.
+The sidebar supports:
+
+- `Live auto`: try live/near-live sources first, then fall back to bundled sample data.
+- `Sample only`: use offline demo data only.
+- `Live strict`: raise an error if live sources fail.
 
 Current live adapters:
 
