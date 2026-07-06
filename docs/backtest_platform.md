@@ -7,8 +7,50 @@ RunJin's Backtest Lab is designed as a research platform, not an execution engin
 - Engine: `backtesting.py`
 - Input: constrained YAML strategy specs
 - Assets: US stock OHLCV and crypto OHLCV already loaded by the app
-- Outputs: equity curve, drawdown overlay, statistics, and trade log
+- Outputs: equity curve, drawdown overlay, statistics, trade log, portfolio rebalance log, and latest weights
 - Safety: no leverage, no real orders, no exchange keys, no arbitrary Python execution
+
+## Borrowed Strengths
+
+RunJin does not install every mature backtesting framework into one Streamlit app. It borrows their strongest ideas and keeps a narrow implementation surface:
+
+| System | Strength integrated into RunJin |
+|---|---|
+| `backtesting.py` | Single-instrument Strategy/Backtest execution, statistics, equity curve, and trade log. |
+| `backtrader` | Event-driven discipline, broker-simulation boundaries, commission assumptions, and future slippage/order-model roadmap. |
+| `qstrader` | Clean separation between data, strategy, portfolio, execution, and reporting. |
+| `QuantResearch` | Research workflow mindset: factors, risk, VaR, regimes, notebooks, and experiment history. |
+| `bt` | Portfolio allocation, rebalancing, reusable strategy blocks, comparison-oriented reporting. |
+| `Gekko BacktestTool` | Crypto-bot oriented rapid iteration and parameter testing, without connecting real exchange keys. |
+
+## Portfolio Templates
+
+The Portfolio Lab is a lightweight portfolio-rebalance simulator inspired by `bt` and qstrader-style portfolio boundaries:
+
+- `equal_weight_rebalance`
+- `momentum_top_n`
+- `inverse_volatility`
+
+Example:
+
+```yaml
+name: RunJin AI infrastructure basket
+template: momentum_top_n
+cash: 100000
+commission_pct: 0.10
+rebalance_days: 20
+max_position_pct: 0.25
+parameters:
+  lookback_days: 60
+  top_n: 4
+universe:
+  - NVDA
+  - AVGO
+  - AMD
+  - TSM
+  - PLTR
+  - TSLA
+```
 
 ## Why YAML Specs Instead Of Raw Python
 

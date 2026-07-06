@@ -59,6 +59,98 @@ parameters:
 """,
 }
 
+BACKTEST_SYSTEM_MAP = [
+    {
+        "project": "backtesting.py",
+        "best_idea": "Fast single-instrument Strategy/Backtest workflow with detailed stats and trades.",
+        "runjin_integration": "Single Asset tab executes vetted YAML templates through backtesting.py.",
+        "status": "wired",
+    },
+    {
+        "project": "backtrader",
+        "best_idea": "Event-driven mindset, broker simulation, commission/slippage, orders, multiple timeframes.",
+        "runjin_integration": "Execution constraints, no leverage, commission fields, and future order/slippage roadmap.",
+        "status": "absorbed_design",
+    },
+    {
+        "project": "qstrader",
+        "best_idea": "Portfolio/event architecture with clear data, strategy, portfolio, and execution boundaries.",
+        "runjin_integration": "Backtest engine adapters are isolated from Streamlit UI and paper bot execution.",
+        "status": "absorbed_design",
+    },
+    {
+        "project": "QuantResearch",
+        "best_idea": "Research notebooks for portfolio optimization, VaR, factors, mean reversion, pairs, and regimes.",
+        "runjin_integration": "Research diagnostics and future experiment logging live under Backtest Lab docs.",
+        "status": "research_roadmap",
+    },
+    {
+        "project": "bt",
+        "best_idea": "Composable portfolio algos, rebalancing, reusable blocks, and detailed comparison reports.",
+        "runjin_integration": "Portfolio tab supports equal weight, momentum top-N, inverse volatility, turnover and cost.",
+        "status": "wired_lightweight",
+    },
+    {
+        "project": "Gekko BacktestTool",
+        "best_idea": "Crypto-bot style rapid strategy comparison and parameter iteration.",
+        "runjin_integration": "Crypto OHLCV can be tested in Single Asset tab; parameter sweeps are next-stage.",
+        "status": "absorbed_design",
+    },
+]
+
+DEFAULT_PORTFOLIO_SPEC = """name: RunJin AI infrastructure basket
+template: momentum_top_n
+cash: 100000
+commission_pct: 0.10
+rebalance_days: 20
+max_position_pct: 0.25
+parameters:
+  lookback_days: 60
+  top_n: 4
+universe:
+  - NVDA
+  - AVGO
+  - AMD
+  - TSM
+  - PLTR
+  - TSLA
+"""
+
+
+EXAMPLE_PORTFOLIO_SPECS = {
+    "Momentum top-N": DEFAULT_PORTFOLIO_SPEC,
+    "Equal weight basket": """name: RunJin equal-weight watchlist
+template: equal_weight_rebalance
+cash: 100000
+commission_pct: 0.10
+rebalance_days: 20
+max_position_pct: 0.20
+parameters: {}
+universe:
+  - NVDA
+  - AVGO
+  - AMD
+  - TSM
+  - PLTR
+""",
+    "Inverse volatility": """name: RunJin inverse-volatility basket
+template: inverse_volatility
+cash: 100000
+commission_pct: 0.10
+rebalance_days: 20
+max_position_pct: 0.25
+parameters:
+  lookback_days: 40
+universe:
+  - NVDA
+  - AVGO
+  - AMD
+  - TSM
+  - PLTR
+  - TSLA
+""",
+}
+
 
 class BacktestEngineUnavailable(RuntimeError):
     pass
@@ -72,6 +164,17 @@ class BacktestResult:
     equity_curve: pd.DataFrame
     trades: pd.DataFrame
     data: pd.DataFrame
+    warnings: list[str]
+
+
+@dataclass
+class PortfolioBacktestResult:
+    name: str
+    template: str
+    stats: dict[str, Any]
+    equity_curve: pd.DataFrame
+    rebalance_log: pd.DataFrame
+    weights: pd.DataFrame
     warnings: list[str]
 
 
@@ -124,6 +227,43 @@ def _coerce_scalar(value: str):
         return int(value)
     except ValueError:
         return value
+
+
+def load_portfolio_spec(raw_spec: str) -> dict[str, Any]:
+    try:
+        import yaml
+    except ImportError:
+        return _parse_simple_portfolio_yaml(raw_spec)
+
+    spec = yaml.safe_load(raw_spec) or {}
+    if not isinstance(spec, dict):
+        raise ValueError("Portfolio spec must be a YAML object.")
+    return spec
+
+
+def _parse_simple_portfolio_yaml(raw_spec: str) -> dict[str, Any]:
+    spec: dict[str, Any] = {}
+    current_section = None
+    for raw_line in raw_spec.splitlines():
+        line = raw_line.split("#", 1)[0].rstrip()
+        if not line.strip():
+            continue
+        stripped = line.strip()
+        if current_section == "universe" and stripped.startswith("- "):
+            spec.setdefault("universe", []).append(stripped[2:].strip())
+            continue
+        if line.startswith("  ") and current_section == "parameters":
+            key, value = _split_yaml_pair(stripped)
+            spec.setdefault("parameters", {})[key] = _coerce_scalar(value)
+            continue
+        key, value = _split_yaml_pair(stripped)
+        if value == "":
+            spec[key] = [] if key == "universe" else {}
+            current_section = key
+        else:
+            spec[key] = _coerce_scalar(value)
+            current_section = None
+    return spec
 
 
 def prepare_ohlcv(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
@@ -288,6 +428,190 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
         data=data.reset_index(),
         warnings=warnings,
     )
+
+
+def run_portfolio_backtest(raw_prices: pd.DataFrame, raw_spec: str) -> PortfolioBacktestResult:
+    spec = load_portfolio_spec(raw_spec)
+    normalized, warnings = validate_portfolio_spec(spec)
+    prices = _prepare_price_matrix(raw_prices, normalized["universe"])
+    if prices.empty or prices.shape[1] < 2:
+        raise ValueError("Portfolio backtest needs at least two symbols with overlapping price history.")
+
+    returns = prices.pct_change().fillna(0)
+    rebalance_days = normalized["rebalance_days"]
+    commission = normalized["commission"]
+    cash = normalized["cash"]
+    max_position = normalized["max_position_pct"]
+    params = normalized["parameters"]
+
+    equity = cash
+    current_weights = pd.Series(0.0, index=prices.columns)
+    rows = []
+    weights_rows = []
+    rebalance_rows = []
+
+    for i, date in enumerate(prices.index):
+        daily_return = float((current_weights * returns.loc[date]).sum())
+        equity *= 1 + daily_return
+        turnover = 0.0
+        cost = 0.0
+
+        should_rebalance = i == 0 or i % rebalance_days == 0
+        if should_rebalance:
+            target_weights = _portfolio_target_weights(
+                normalized["template"],
+                prices.iloc[: i + 1],
+                params,
+                max_position,
+            )
+            turnover = float((target_weights - current_weights).abs().sum())
+            cost = equity * turnover * commission
+            equity -= cost
+            rebalance_rows.append(
+                {
+                    "date": date,
+                    "turnover": turnover,
+                    "cost": cost,
+                    "equity_after_cost": equity,
+                    "active_positions": int((target_weights > 0).sum()),
+                    "top_weight": float(target_weights.max()) if not target_weights.empty else 0.0,
+                }
+            )
+            current_weights = target_weights
+
+        rows.append({"date": date, "Equity": equity, "Return": daily_return, "Turnover": turnover, "Cost": cost})
+        weights_row = {"date": date}
+        weights_row.update(current_weights.to_dict())
+        weights_rows.append(weights_row)
+
+    equity_curve = pd.DataFrame(rows)
+    equity_curve["DrawdownPct"] = equity_curve["Equity"] / equity_curve["Equity"].cummax() - 1
+    stats = _portfolio_stats(equity_curve, prices, cash)
+    return PortfolioBacktestResult(
+        name=normalized["name"],
+        template=normalized["template"],
+        stats=stats,
+        equity_curve=equity_curve,
+        rebalance_log=pd.DataFrame(rebalance_rows),
+        weights=pd.DataFrame(weights_rows),
+        warnings=warnings,
+    )
+
+
+def validate_portfolio_spec(spec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    warnings: list[str] = []
+    template = str(spec.get("template", "equal_weight_rebalance")).strip()
+    if template not in {"equal_weight_rebalance", "momentum_top_n", "inverse_volatility"}:
+        raise ValueError(f"Unsupported portfolio template: {template}")
+
+    universe = spec.get("universe", [])
+    if not isinstance(universe, list) or len(universe) < 2:
+        raise ValueError("universe must include at least two tickers.")
+    universe = [str(item).strip().upper() for item in universe if str(item).strip()]
+
+    cash = float(spec.get("cash", 100000))
+    commission_pct = float(spec.get("commission_pct", 0.1))
+    rebalance_days = int(spec.get("rebalance_days", 20))
+    max_position_pct = float(spec.get("max_position_pct", 0.25))
+    params = spec.get("parameters", {}) or {}
+    if not isinstance(params, dict):
+        raise ValueError("parameters must be a YAML object.")
+    if cash <= 0:
+        raise ValueError("cash must be positive.")
+    if commission_pct < 0 or commission_pct > 2:
+        raise ValueError("commission_pct must be between 0 and 2.")
+    if rebalance_days < 1:
+        raise ValueError("rebalance_days must be at least 1.")
+    if max_position_pct <= 0 or max_position_pct > 1:
+        raise ValueError("max_position_pct must be > 0 and <= 1.")
+    if max_position_pct * len(universe) < 0.99:
+        warnings.append("max_position_pct is tight enough that the portfolio may hold residual cash.")
+
+    return {
+        "name": str(spec.get("name", template)).strip() or template,
+        "template": template,
+        "universe": universe,
+        "cash": cash,
+        "commission": commission_pct / 100,
+        "rebalance_days": rebalance_days,
+        "max_position_pct": max_position_pct,
+        "parameters": params,
+    }, warnings
+
+
+def _prepare_price_matrix(raw_prices: pd.DataFrame, universe: list[str]) -> pd.DataFrame:
+    required = {"date", "ticker", "close"}
+    missing = required - set(raw_prices.columns)
+    if missing:
+        raise ValueError(f"Missing price columns: {', '.join(sorted(missing))}")
+    data = raw_prices.loc[raw_prices["ticker"].isin(universe), ["date", "ticker", "close"]].copy()
+    data["date"] = pd.to_datetime(data["date"], errors="coerce")
+    data["close"] = pd.to_numeric(data["close"], errors="coerce")
+    matrix = data.dropna().pivot_table(index="date", columns="ticker", values="close", aggfunc="last").sort_index()
+    return matrix.ffill().dropna(axis=1, how="all").dropna()
+
+
+def _portfolio_target_weights(template: str, price_history: pd.DataFrame, params: dict[str, Any], max_position: float) -> pd.Series:
+    columns = price_history.columns
+    weights = pd.Series(0.0, index=columns)
+    if template == "equal_weight_rebalance":
+        selected = list(columns)
+    elif template == "momentum_top_n":
+        lookback = int(params.get("lookback_days", 60))
+        top_n = int(params.get("top_n", min(5, len(columns))))
+        if len(price_history) <= lookback:
+            selected = list(columns[:top_n])
+        else:
+            momentum = price_history.iloc[-1] / price_history.iloc[-lookback] - 1
+            selected = momentum.sort_values(ascending=False).head(top_n).index.tolist()
+    elif template == "inverse_volatility":
+        lookback = int(params.get("lookback_days", 40))
+        vol = price_history.pct_change().tail(lookback).std().replace(0, np.nan)
+        inv_vol = (1 / vol).replace([np.inf, -np.inf], np.nan).dropna()
+        if inv_vol.empty:
+            selected = list(columns)
+            raw_weights = pd.Series(1 / len(selected), index=selected)
+        else:
+            raw_weights = inv_vol / inv_vol.sum()
+            selected = raw_weights.index.tolist()
+        capped = raw_weights.clip(upper=max_position)
+        weights.loc[capped.index] = capped
+        if weights.sum() > 1:
+            weights = weights / weights.sum()
+        return weights
+    else:
+        selected = list(columns)
+
+    if selected:
+        equal = min(max_position, 1 / len(selected))
+        weights.loc[selected] = equal
+    return weights
+
+
+def _portfolio_stats(equity_curve: pd.DataFrame, prices: pd.DataFrame, starting_cash: float) -> dict[str, Any]:
+    daily_returns = equity_curve["Equity"].pct_change().dropna()
+    periods = max(len(equity_curve), 1)
+    total_return = equity_curve["Equity"].iloc[-1] / starting_cash - 1
+    annualized_return = (1 + total_return) ** (252 / periods) - 1 if periods > 1 else 0
+    annualized_vol = daily_returns.std() * np.sqrt(252) if not daily_returns.empty else 0
+    sharpe = annualized_return / annualized_vol if annualized_vol and annualized_vol > 0 else np.nan
+    max_drawdown = equity_curve["DrawdownPct"].min()
+    benchmark = prices.mean(axis=1)
+    benchmark_return = benchmark.iloc[-1] / benchmark.iloc[0] - 1 if len(benchmark) > 1 else 0
+    return {
+        "Start": equity_curve["date"].iloc[0],
+        "End": equity_curve["date"].iloc[-1],
+        "Equity Final [$]": float(equity_curve["Equity"].iloc[-1]),
+        "Return [%]": float(total_return * 100),
+        "Benchmark Equal Basket Return [%]": float(benchmark_return * 100),
+        "Return (Ann.) [%]": float(annualized_return * 100),
+        "Volatility (Ann.) [%]": float(annualized_vol * 100),
+        "Sharpe Ratio": float(sharpe) if pd.notna(sharpe) else None,
+        "Max. Drawdown [%]": float(max_drawdown * 100),
+        "Rebalances": int((equity_curve["Turnover"] > 0).sum()),
+        "Total Cost [$]": float(equity_curve["Cost"].sum()),
+        "Avg Turnover": float(equity_curve.loc[equity_curve["Turnover"] > 0, "Turnover"].mean() or 0),
+    }
 
 
 def _stats_to_dict(stats) -> dict[str, Any]:

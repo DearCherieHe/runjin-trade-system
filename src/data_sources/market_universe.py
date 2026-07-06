@@ -40,6 +40,29 @@ def _empty_universe() -> pd.DataFrame:
     return pd.DataFrame(columns=UNIVERSE_COLUMNS)
 
 
+def ensure_market_universe_columns(df: pd.DataFrame) -> pd.DataFrame:
+    view = df.copy()
+    defaults = {
+        "ticker": "",
+        "yahoo_ticker": "",
+        "company": "",
+        "market": "UNKNOWN",
+        "exchange": "UNKNOWN",
+        "currency": "USD",
+        "market_cap_usd": 0,
+        "market_rank": None,
+        "source": "unknown",
+    }
+    for col, default in defaults.items():
+        if col not in view.columns:
+            view[col] = default
+    if "market_group" not in view.columns:
+        view["market_group"] = view["market"]
+    view["market_group"] = view["market_group"].fillna(view["market"]).replace("", "UNKNOWN")
+    view["market_cap_usd"] = pd.to_numeric(view["market_cap_usd"], errors="coerce").fillna(0)
+    return view
+
+
 def _normalize_ticker(value) -> str:
     return str(value).strip().upper()
 
@@ -186,9 +209,7 @@ def select_top_market_symbols(
 ) -> pd.DataFrame:
     if df.empty:
         return df
-    result = df.copy()
-    if "market_group" not in result.columns:
-        result["market_group"] = result["market"]
+    result = ensure_market_universe_columns(df)
     result["market_cap_usd"] = pd.to_numeric(result["market_cap_usd"], errors="coerce")
     result = result.loc[result["market_cap_usd"] >= float(min_market_cap_usd)]
     result = result.sort_values(["market_group", "market_cap_usd"], ascending=[True, False]).reset_index(drop=True)

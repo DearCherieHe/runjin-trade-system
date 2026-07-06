@@ -14,11 +14,14 @@ from src.data_sources.loaders import (
     load_watchlist_notes,
 )
 from src.data_sources.finance_mcp import load_finance_mcp_capabilities, load_finance_mcp_research
+from src.data_sources.market_universe import ensure_market_universe_columns
 from src.backtest_lab.engine import (
     BacktestEngineUnavailable,
     DEFAULT_STRATEGY_SPEC,
+    DEFAULT_PORTFOLIO_SPEC,
     load_strategy_spec,
     prepare_ohlcv,
+    run_portfolio_backtest,
     run_strategy_backtest,
     validate_strategy_spec,
 )
@@ -53,6 +56,10 @@ def main():
     assert_true((market_universe["market_cap_usd"] >= 300_000_000).all(), "Market universe includes micro caps below USD 300M")
     assert_true((market_universe.groupby("market_group")["ticker"].count() <= 3000).all(), "Market universe exceeds top 3000 per market")
     assert_true((market_universe["market_rank"] <= 3000).all(), "Market universe rank exceeds 3000")
+    repaired_universe = ensure_market_universe_columns(
+        market_universe.drop(columns=["market_group"]).head(1)
+    )
+    assert_true("market_group" in repaired_universe.columns, "Market universe repair did not create market_group")
 
     for ticker in tickers:
         assert_true(not prices.loc[prices["ticker"] == ticker].empty, f"Missing price rows for {ticker}")
@@ -98,6 +105,9 @@ def main():
         assert_true("Return [%]" in backtest_result.stats, "Backtest stats missing return")
     except BacktestEngineUnavailable:
         pass
+    portfolio_result = run_portfolio_backtest(prices, DEFAULT_PORTFOLIO_SPEC)
+    assert_true("Return [%]" in portfolio_result.stats, "Portfolio backtest stats missing return")
+    assert_true(not portfolio_result.rebalance_log.empty, "Portfolio rebalance log is empty")
 
     stressed = stock_bt.copy()
     stressed.loc[stressed.index[-1], "equity"] = stressed["equity"].iloc[-2] * 0.90

@@ -15,10 +15,15 @@ from src.data_sources.loaders import (
     load_watchlist_notes,
 )
 from src.data_sources.finance_mcp import load_finance_mcp_capabilities, load_finance_mcp_research
+from src.data_sources.market_universe import ensure_market_universe_columns
 from src.backtest_lab.engine import (
+    BACKTEST_SYSTEM_MAP,
     BacktestEngineUnavailable,
     DEFAULT_STRATEGY_SPEC,
+    DEFAULT_PORTFOLIO_SPEC,
     EXAMPLE_STRATEGY_SPECS,
+    EXAMPLE_PORTFOLIO_SPECS,
+    run_portfolio_backtest,
     run_strategy_backtest,
 )
 from src.kline.indicators import add_indicators, classify_regime, relative_strength
@@ -688,6 +693,7 @@ def page_market_universe(market_universe):
     if market_universe.empty:
         st.warning("No market universe rows are available. Configure full listing CSV files in configs/live_sources.yaml.")
         return
+    market_universe = ensure_market_universe_columns(market_universe)
 
     markets = sorted(market_universe["market"].dropna().unique())
     exchanges = sorted(market_universe["exchange"].dropna().unique())
@@ -722,20 +728,19 @@ def page_market_universe(market_universe):
     if not cap_by_market.empty:
         named_table("Market cap by market", cap_by_market.assign(market_cap_usd=cap_by_market["market_cap_usd"].map(lambda value: f"${fmt_int(value)}")))
 
-    table = view[
-        [
-            "ticker",
-            "yahoo_ticker",
-            "company",
-            "market_group",
-            "market_rank",
-            "market",
-            "exchange",
-            "currency",
-            "market_cap_usd",
-            "source",
-        ]
-    ].copy()
+    table_columns = [
+        "ticker",
+        "yahoo_ticker",
+        "company",
+        "market_group",
+        "market_rank",
+        "market",
+        "exchange",
+        "currency",
+        "market_cap_usd",
+        "source",
+    ]
+    table = view[[col for col in table_columns if col in view.columns]].copy()
     table["market_cap_usd"] = table["market_cap_usd"].map(lambda value: f"${fmt_int(value)}")
     named_table("Filtered multi-market stock universe", table)
 
@@ -1022,48 +1027,107 @@ def page_backtest_lab(prices, crypto):
         st.session_state["bt_result"] = result
 
     result = st.session_state.get("bt_result")
-    if not result:
-        return
+    if result:
+        for warning in result.warnings:
+            st.warning(warning)
 
-    for warning in result.warnings:
-        st.warning(warning)
+        stats = result.stats
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Return", fmt_number(stats.get("Return [%]"), 1, "%"))
+        col2.metric("Max drawdown", fmt_number(stats.get("Max. Drawdown [%]"), 1, "%"))
+        col3.metric("Sharpe", fmt_number(stats.get("Sharpe Ratio"), 2))
+        col4.metric("Win rate", fmt_number(stats.get("Win Rate [%]"), 1, "%"))
+        col5.metric("Trades", fmt_int(stats.get("# Trades", 0) or 0))
 
-    stats = result.stats
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Return", fmt_number(stats.get("Return [%]"), 1, "%"))
-    col2.metric("Max drawdown", fmt_number(stats.get("Max. Drawdown [%]"), 1, "%"))
-    col3.metric("Sharpe", fmt_number(stats.get("Sharpe Ratio"), 2))
-    col4.metric("Win rate", fmt_number(stats.get("Win Rate [%]"), 1, "%"))
-    col5.metric("Trades", fmt_int(stats.get("# Trades", 0) or 0))
-
-    equity = result.equity_curve.copy()
-    date_col = "Date" if "Date" in equity.columns else equity.columns[0]
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=equity[date_col], y=equity["Equity"], name="Equity", line=dict(color="#2ed17c")))
-    if "DrawdownPct" in equity.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=equity[date_col],
-                y=equity["DrawdownPct"] * 100,
-                name="Drawdown %",
-                yaxis="y2",
-                line=dict(color="#ff5f64", width=1),
+        equity = result.equity_curve.copy()
+        date_col = "Date" if "Date" in equity.columns else equity.columns[0]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=equity[date_col], y=equity["Equity"], name="Equity", line=dict(color="#2ed17c")))
+        if "DrawdownPct" in equity.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=equity[date_col],
+                    y=equity["DrawdownPct"] * 100,
+                    name="Drawdown %",
+                    yaxis="y2",
+                    line=dict(color="#ff5f64", width=1),
+                )
             )
+            fig.update_layout(yaxis2=dict(title="Drawdown %", overlaying="y", side="right", gridcolor="rgba(255,255,255,0)"))
+        fig.update_layout(title=f"{result.name} equity curve", yaxis_title="Equity")
+        style_figure(fig, 410, time_axis=True)
+        st.plotly_chart(fig, use_container_width=True)
+
+        summary = pd.DataFrame([{"metric": key, "value": value} for key, value in stats.items() if key not in {"Start", "End"}])
+        named_table("Backtest statistics", summary)
+
+        trades = result.trades.copy()
+        if not trades.empty:
+            display_cols = [col for col in ["EntryTime", "ExitTime", "Size", "EntryPrice", "ExitPrice", "PnL", "ReturnPct", "Duration"] if col in trades.columns]
+            named_table("Backtest trades", trades[display_cols] if display_cols else trades)
+        else:
+            st.markdown('<div class="runjin-note">No trades were generated. Adjust the strategy parameters or date range.</div>', unsafe_allow_html=True)
+
+    section_label("Portfolio Backtest")
+    st.markdown(
+        '<div class="runjin-note">Portfolio Lab absorbs the best bt/qstrader idea: test allocation rules, rebalancing, turnover, and cost before thinking about execution.</div>',
+        unsafe_allow_html=True,
+    )
+    col1, col2 = st.columns([1.2, 1])
+    portfolio_template = col1.selectbox("Portfolio template", list(EXAMPLE_PORTFOLIO_SPECS.keys()), key="portfolio_template")
+    if col2.button("Load portfolio template", key="portfolio_load"):
+        st.session_state["portfolio_spec"] = EXAMPLE_PORTFOLIO_SPECS[portfolio_template]
+
+    portfolio_spec = st.text_area(
+        "Portfolio YAML",
+        value=st.session_state.get("portfolio_spec", EXAMPLE_PORTFOLIO_SPECS.get(portfolio_template, DEFAULT_PORTFOLIO_SPEC)),
+        height=245,
+        key="portfolio_spec",
+        help="Templates: equal_weight_rebalance, momentum_top_n, inverse_volatility. No leverage; max_position_pct caps concentration.",
+    )
+    if st.button("Run portfolio backtest", type="primary", key="portfolio_run"):
+        with st.spinner("Running portfolio rebalance simulation..."):
+            try:
+                portfolio_result = run_portfolio_backtest(prices, portfolio_spec)
+            except Exception as exc:
+                st.error(f"Portfolio backtest failed: {exc}")
+                return
+        st.session_state["portfolio_result"] = portfolio_result
+
+    portfolio_result = st.session_state.get("portfolio_result")
+    if portfolio_result:
+        for warning in portfolio_result.warnings:
+            st.warning(warning)
+        stats = portfolio_result.stats
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Return", fmt_number(stats.get("Return [%]"), 1, "%"))
+        col2.metric("Max drawdown", fmt_number(stats.get("Max. Drawdown [%]"), 1, "%"))
+        col3.metric("Sharpe", fmt_number(stats.get("Sharpe Ratio"), 2))
+        col4.metric("Rebalances", fmt_int(stats.get("Rebalances", 0) or 0))
+        col5.metric("Total cost", f"${fmt_int(stats.get('Total Cost [$]', 0) or 0)}")
+
+        equity = portfolio_result.equity_curve.copy()
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=equity["date"], y=equity["Equity"], name="Equity", line=dict(color="#2ed17c")))
+        fig.add_trace(go.Scatter(x=equity["date"], y=equity["DrawdownPct"] * 100, name="Drawdown %", yaxis="y2", line=dict(color="#ff5f64", width=1)))
+        fig.update_layout(
+            title=f"{portfolio_result.name} portfolio equity",
+            yaxis_title="Equity",
+            yaxis2=dict(title="Drawdown %", overlaying="y", side="right", gridcolor="rgba(255,255,255,0)"),
         )
-        fig.update_layout(yaxis2=dict(title="Drawdown %", overlaying="y", side="right", gridcolor="rgba(255,255,255,0)"))
-    fig.update_layout(title=f"{result.name} equity curve", yaxis_title="Equity")
-    style_figure(fig, 410, time_axis=True)
-    st.plotly_chart(fig, use_container_width=True)
+        style_figure(fig, 410, time_axis=True)
+        st.plotly_chart(fig, use_container_width=True)
+        named_table("Portfolio statistics", pd.DataFrame([{"metric": key, "value": value} for key, value in stats.items()]))
+        if not portfolio_result.rebalance_log.empty:
+            named_table("Rebalance log", portfolio_result.rebalance_log.tail(30).round(4))
+        if not portfolio_result.weights.empty:
+            latest_weights = portfolio_result.weights.tail(1).drop(columns=["date"], errors="ignore").T.reset_index()
+            latest_weights.columns = ["symbol", "weight"]
+            latest_weights = latest_weights.sort_values("weight", ascending=False)
+            named_table("Latest weights", latest_weights)
 
-    summary = pd.DataFrame([{"metric": key, "value": value} for key, value in stats.items() if key not in {"Start", "End"}])
-    named_table("Backtest statistics", summary)
-
-    trades = result.trades.copy()
-    if not trades.empty:
-        display_cols = [col for col in ["EntryTime", "ExitTime", "Size", "EntryPrice", "ExitPrice", "PnL", "ReturnPct", "Duration"] if col in trades.columns]
-        named_table("Backtest trades", trades[display_cols] if display_cols else trades)
-    else:
-        st.markdown('<div class="runjin-note">No trades were generated. Adjust the strategy parameters or date range.</div>', unsafe_allow_html=True)
+    section_label("Backtest System Map")
+    named_table("Borrowed strengths from mature systems", pd.DataFrame(BACKTEST_SYSTEM_MAP))
 
 
 def page_short_bot(prices, crypto, risk_rules):
