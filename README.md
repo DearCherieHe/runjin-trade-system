@@ -81,6 +81,16 @@ The `Finance MCP Radar` page turns FinanceMCP-style capabilities into a research
 - optional external research CSV path through `FINANCE_MCP_RESEARCH_CSV`
 - optional MCP/HTTP service pointer through `FINANCE_MCP_HTTP_URL`
 
+## Backtest Lab
+
+The `Backtest Lab` page uses `backtesting.py` as the execution engine instead of a homegrown backtester.
+
+- input strategy specs as editable YAML, not arbitrary Python code
+- supported templates: `sma_crossover`, `rsi_mean_reversion`, `bollinger_reversion`, `macd_trend`
+- supported assets: US stock OHLCV and crypto OHLCV from the current data mode
+- outputs: return, max drawdown, Sharpe, win rate, trade count, equity curve, drawdown overlay, statistics table, and trade log
+- V0.1 is research-only: no leverage, no broker orders, no exchange keys, no automatic live trading
+
 ## Boundaries
 
 - No real brokerage integration.

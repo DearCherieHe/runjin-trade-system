@@ -15,6 +15,12 @@ from src.data_sources.loaders import (
     load_watchlist_notes,
 )
 from src.data_sources.finance_mcp import load_finance_mcp_capabilities, load_finance_mcp_research
+from src.backtest_lab.engine import (
+    BacktestEngineUnavailable,
+    DEFAULT_STRATEGY_SPEC,
+    EXAMPLE_STRATEGY_SPECS,
+    run_strategy_backtest,
+)
 from src.kline.indicators import add_indicators, classify_regime, relative_strength
 from src.kline.timeframes import apply_asof, coverage_summary, resample_ohlcv
 from src.data_sources.live_sources import fetch_yfinance_prices
@@ -382,6 +388,15 @@ def fmt_int(value):
 
 def fmt_pct(value):
     return f"{value * 100:.0f}%"
+
+
+def fmt_number(value, digits=1, suffix=""):
+    try:
+        if pd.isna(value):
+            return "N/A"
+        return f"{float(value):,.{digits}f}{suffix}"
+    except (TypeError, ValueError):
+        return "N/A"
 
 
 def coerce_datetime_key(df, column="date"):
@@ -922,6 +937,115 @@ def page_kline_lab(prices, forecasts, market_universe, data_mode):
         st.plotly_chart(fig, use_container_width=True)
 
 
+def page_backtest_lab(prices, crypto):
+    page_header(
+        "Backtest Lab / Strategy Proof",
+        "策略回测平台",
+        "A safer backtesting desk built on backtesting.py: you define a constrained YAML strategy spec, the engine runs on OHLCV bars, and the output shows equity, drawdown, trades, and robustness warnings. V0.1 does not execute arbitrary Python.",
+        ["backtesting.py", "No eval", "No leverage", "Research only"],
+    )
+    st.markdown(
+        '<div class="runjin-note">Input is a controlled YAML strategy spec, not raw Python code. This keeps the platform reproducible and avoids executing unsafe user code inside Streamlit.</div>',
+        unsafe_allow_html=True,
+    )
+
+    asset_class = st.radio("Asset class", ["US stock", "Crypto"], horizontal=True, key="bt_asset_class")
+    if asset_class == "US stock":
+        ticker = st.selectbox("Ticker", sorted(prices["ticker"].unique()), index=0, key="bt_ticker")
+        raw = prices.loc[prices["ticker"] == ticker].copy()
+        time_col = "date"
+        timeframe = st.selectbox("Backtest timeframe", ["1D", "1W", "1M"], index=0, key="bt_stock_timeframe")
+        raw = resample_ohlcv(raw, timeframe, "date")
+    else:
+        ticker = st.selectbox("Symbol", sorted(crypto["symbol"].unique()), index=0, key="bt_symbol")
+        raw = crypto.loc[crypto["symbol"] == ticker].copy()
+        time_col = "datetime"
+        timeframe = st.selectbox("Backtest timeframe", ["1H", "1D"], index=0, key="bt_crypto_timeframe")
+        if timeframe == "1D":
+            raw = resample_ohlcv(raw.rename(columns={"datetime": "date"}), "1D", "date").rename(columns={"date": "datetime"})
+
+    raw[time_col] = pd.to_datetime(raw[time_col], errors="coerce")
+    min_date = raw[time_col].min().date()
+    max_date = raw[time_col].max().date()
+    col1, col2, col3 = st.columns([1, 1, 1.2])
+    start_date = col1.date_input("Start", value=min_date, min_value=min_date, max_value=max_date, key="bt_start")
+    end_date = col2.date_input("End", value=max_date, min_value=min_date, max_value=max_date, key="bt_end")
+    example_name = col3.selectbox("Template", list(EXAMPLE_STRATEGY_SPECS.keys()), key="bt_template")
+
+    if st.button("Load template", key="bt_load_template"):
+        st.session_state["bt_strategy_spec"] = EXAMPLE_STRATEGY_SPECS[example_name]
+
+    default_spec = st.session_state.get("bt_strategy_spec", EXAMPLE_STRATEGY_SPECS.get(example_name, DEFAULT_STRATEGY_SPEC))
+    strategy_spec = st.text_area(
+        "Strategy YAML",
+        value=default_spec,
+        height=260,
+        key="bt_strategy_spec",
+        help="Edit parameters safely. Supported templates: sma_crossover, rsi_mean_reversion, bollinger_reversion, macd_trend.",
+    )
+
+    mask = (raw[time_col].dt.date >= start_date) & (raw[time_col].dt.date <= end_date)
+    backtest_data = raw.loc[mask].copy()
+    st.caption(f"Backtest dataset: {ticker} / {timeframe} / {len(backtest_data):,} bars / {start_date} -> {end_date}")
+
+    if st.button("Run backtest", type="primary", key="bt_run"):
+        with st.spinner("Running backtest with backtesting.py..."):
+            try:
+                result = run_strategy_backtest(backtest_data, time_col, strategy_spec)
+            except BacktestEngineUnavailable as exc:
+                st.error(str(exc))
+                st.code("pip install -r requirements.txt", language="bash")
+                return
+            except Exception as exc:
+                st.error(f"Backtest failed: {exc}")
+                return
+        st.session_state["bt_result"] = result
+
+    result = st.session_state.get("bt_result")
+    if not result:
+        return
+
+    for warning in result.warnings:
+        st.warning(warning)
+
+    stats = result.stats
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Return", fmt_number(stats.get("Return [%]"), 1, "%"))
+    col2.metric("Max drawdown", fmt_number(stats.get("Max. Drawdown [%]"), 1, "%"))
+    col3.metric("Sharpe", fmt_number(stats.get("Sharpe Ratio"), 2))
+    col4.metric("Win rate", fmt_number(stats.get("Win Rate [%]"), 1, "%"))
+    col5.metric("Trades", fmt_int(stats.get("# Trades", 0) or 0))
+
+    equity = result.equity_curve.copy()
+    date_col = "Date" if "Date" in equity.columns else equity.columns[0]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=equity[date_col], y=equity["Equity"], name="Equity", line=dict(color="#2ed17c")))
+    if "DrawdownPct" in equity.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=equity[date_col],
+                y=equity["DrawdownPct"] * 100,
+                name="Drawdown %",
+                yaxis="y2",
+                line=dict(color="#ff5f64", width=1),
+            )
+        )
+        fig.update_layout(yaxis2=dict(title="Drawdown %", overlaying="y", side="right", gridcolor="rgba(255,255,255,0)"))
+    fig.update_layout(title=f"{result.name} equity curve", yaxis_title="Equity")
+    style_figure(fig, 410, time_axis=True)
+    st.plotly_chart(fig, use_container_width=True)
+
+    summary = pd.DataFrame([{"metric": key, "value": value} for key, value in stats.items() if key not in {"Start", "End"}])
+    named_table("Backtest statistics", summary)
+
+    trades = result.trades.copy()
+    if not trades.empty:
+        display_cols = [col for col in ["EntryTime", "ExitTime", "Size", "EntryPrice", "ExitPrice", "PnL", "ReturnPct", "Duration"] if col in trades.columns]
+        named_table("Backtest trades", trades[display_cols] if display_cols else trades)
+    else:
+        st.markdown('<div class="runjin-note">No trades were generated. Adjust the strategy parameters or date range.</div>', unsafe_allow_html=True)
+
+
 def page_short_bot(prices, crypto, risk_rules):
     page_header(
         "Short Book / Small Cashflow Engine",
@@ -1015,7 +1139,7 @@ def main():
         st.stop()
     page = st.sidebar.radio(
         "Workspace",
-        ["Dashboard", "Market Universe", "Long Watchlist", "Finance MCP Radar", "Stock Detail", "K-line Lab", "Short Bot", "Weekly Report"],
+        ["Dashboard", "Market Universe", "Long Watchlist", "Finance MCP Radar", "Stock Detail", "K-line Lab", "Backtest Lab", "Short Bot", "Weekly Report"],
     )
     st.sidebar.caption(f"MODE / {data_mode}")
     st.sidebar.caption("BOUNDARY / V0.1 never places real orders.")
@@ -1032,6 +1156,8 @@ def main():
         page_stock_detail(prices, financials, scored, forecasts, data_mode)
     elif page == "K-line Lab":
         page_kline_lab(prices, forecasts, market_universe, data_mode)
+    elif page == "Backtest Lab":
+        page_backtest_lab(prices, crypto)
     elif page == "Short Bot":
         page_short_bot(prices, crypto, risk_rules)
     elif page == "Weekly Report":

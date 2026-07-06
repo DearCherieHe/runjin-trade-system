@@ -14,6 +14,14 @@ from src.data_sources.loaders import (
     load_watchlist_notes,
 )
 from src.data_sources.finance_mcp import load_finance_mcp_capabilities, load_finance_mcp_research
+from src.backtest_lab.engine import (
+    BacktestEngineUnavailable,
+    DEFAULT_STRATEGY_SPEC,
+    load_strategy_spec,
+    prepare_ohlcv,
+    run_strategy_backtest,
+    validate_strategy_spec,
+)
 from src.kline.indicators import add_indicators
 from src.long_term.scoring import SCORE_COLUMNS, build_score_table
 from src.quant_bot.paper_trader import run_crypto_paper, run_us_stock_paper
@@ -76,6 +84,17 @@ def main():
     assert_true(not finance_research.empty, "FinanceMCP research radar is empty")
     assert_true(not finance_capabilities.empty, "FinanceMCP capability map is empty")
     assert_true(finance_status["mode"] in {"sample", "external_csv", "mcp_ready_sample_fallback"}, "Invalid FinanceMCP status")
+
+    strategy_spec = load_strategy_spec(DEFAULT_STRATEGY_SPEC)
+    prepared = prepare_ohlcv(prices.loc[prices["ticker"] == "NVDA"].copy(), "date")
+    normalized_spec, warnings = validate_strategy_spec(strategy_spec, len(prepared))
+    assert_true(not prepared.empty, "Backtest OHLCV preparation returned no rows")
+    assert_true(normalized_spec["template"] == "sma_crossover", "Backtest strategy spec did not normalize")
+    try:
+        backtest_result = run_strategy_backtest(prices.loc[prices["ticker"] == "NVDA"].copy(), "date", DEFAULT_STRATEGY_SPEC)
+        assert_true("Return [%]" in backtest_result.stats, "Backtest stats missing return")
+    except BacktestEngineUnavailable:
+        pass
 
     stressed = stock_bt.copy()
     stressed.loc[stressed.index[-1], "equity"] = stressed["equity"].iloc[-2] * 0.90
