@@ -9,7 +9,7 @@ RunJin's Backtest Lab is designed as a research platform, not an execution engin
 - Assets: US stock OHLCV and crypto OHLCV already loaded by the app
 - Outputs: equity curve, drawdown overlay, statistics, trade log, portfolio rebalance log, and latest weights
 - Safety: no leverage, no real orders, no exchange keys, no arbitrary Python execution
-- Bias control: default next-bar execution, truncated-data look-ahead audit, and data-snooping audit
+- Bias control: default next-bar execution, truncated-data look-ahead audit, data-snooping audit, and out-of-sample audit
 
 ## Borrowed Strengths
 
@@ -88,6 +88,11 @@ snooping_check:
   max_parameters: 5
   min_bars_per_parameter: 30
   assumed_trials: 1
+out_of_sample_check:
+  enabled: true
+  train_pct: 0.70
+  min_test_bars: 174
+  max_sharpe_decay: 0.75
 risk_judge:
   enabled: true
   max_volatility: 0.75
@@ -133,6 +138,18 @@ RunJin adds a second audit for overfitting risk:
 - `sample_size_true_sharpe_ge_1`: requires Sharpe >= 1.5 and at least 2,739 data points to support confidence that true Sharpe is at least 1.
 
 The audit is intentionally conservative. A `review` result does not mean a strategy is invalid; it means the backtest performance should be discounted before you trust it.
+
+## Out-Of-Sample Guard
+
+RunJin also reserves the most recent part of the history as an out-of-sample segment:
+
+- `out_of_sample_split`: confirms the train/test split is valid. Default is 70% train and 30% test.
+- `oos_min_test_bars`: checks that the test set has enough bars. Default minimum is 174 bars.
+- `oos_return_reasonable`: flags strategies that collapse in the reserved test period.
+- `oos_sharpe_decay`: compares train Sharpe and test Sharpe; large decay is treated as overfit risk.
+- `oos_sample_size_true_sharpe_ge_0`: applies the same practical sample-size logic to the test set.
+
+This is not full moving optimization yet. It is the first necessary guard: the final parameter set must remain reasonable on a recent period that was not supposed to guide model design.
 
 ## Batch Strategy Leaderboard
 

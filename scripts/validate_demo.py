@@ -211,6 +211,13 @@ def main():
             ),
             "Data-snooping audit missing required checks",
         )
+        assert_true(backtest_result.out_of_sample_audit is not None and not backtest_result.out_of_sample_audit.empty, "Out-of-sample audit missing")
+        assert_true(
+            {"out_of_sample_split", "oos_min_test_bars", "oos_return_reasonable", "oos_sharpe_decay", "oos_sample_size_true_sharpe_ge_0"}.issubset(
+                set(backtest_result.out_of_sample_audit["check"])
+            ),
+            "Out-of-sample audit missing required checks",
+        )
         assert_true(backtest_result.metrics_detail is not None and not backtest_result.metrics_detail.empty, "ABU-style metrics missing")
         assert_true(backtest_result.ump_verdict is not None and not backtest_result.ump_verdict.empty, "UMP-lite verdict missing")
     except BacktestEngineUnavailable:

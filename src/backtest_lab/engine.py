@@ -10,7 +10,7 @@ from src.backtest_lab.costs import describe_execution_assumptions, resolve_commi
 from src.backtest_lab.bias import lookahead_audit_frame, run_lookahead_audit
 from src.backtest_lab.metrics import abu_style_metrics, metrics_detail_frame
 from src.backtest_lab.position_sizing import resolve_position_size
-from src.backtest_lab.snooping import data_snooping_audit_frame
+from src.backtest_lab.snooping import data_snooping_audit_frame, out_of_sample_audit_frame
 from src.backtest_lab.ump_lite import evaluate_ump_lite
 
 
@@ -34,6 +34,11 @@ snooping_check:
   max_parameters: 5
   min_bars_per_parameter: 30
   assumed_trials: 1
+out_of_sample_check:
+  enabled: true
+  train_pct: 0.70
+  min_test_bars: 174
+  max_sharpe_decay: 0.75
 risk_judge:
   enabled: true
   max_volatility: 0.75
@@ -196,6 +201,7 @@ class BacktestResult:
     lookahead_audit: pd.DataFrame | None = None
     lookahead_details: pd.DataFrame | None = None
     snooping_audit: pd.DataFrame | None = None
+    out_of_sample_audit: pd.DataFrame | None = None
 
 
 @dataclass
@@ -367,6 +373,9 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
     snooping_check = spec.get("snooping_check", {"enabled": True, "max_parameters": 5, "min_bars_per_parameter": 30, "assumed_trials": 1}) or {}
     if not isinstance(snooping_check, dict):
         raise ValueError("snooping_check must be a YAML object.")
+    out_of_sample_check = spec.get("out_of_sample_check", {"enabled": True, "train_pct": 0.70, "min_test_bars": 174, "max_sharpe_decay": 0.75}) or {}
+    if not isinstance(out_of_sample_check, dict):
+        raise ValueError("out_of_sample_check must be a YAML object.")
     position_parameters = spec.get("position_parameters", {}) or {}
     if not isinstance(position_parameters, dict):
         raise ValueError("position_parameters must be a YAML object.")
@@ -392,6 +401,7 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
         "risk_judge": risk_judge,
         "lookahead_check": lookahead_check,
         "snooping_check": snooping_check,
+        "out_of_sample_check": out_of_sample_check,
         "parameters": params,
     }
     return normalized, warnings
@@ -500,6 +510,9 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
     snooping_audit = data_snooping_audit_frame(normalized, summary, len(data)) if bool(normalized["snooping_check"].get("enabled", True)) else pd.DataFrame()
     if not snooping_audit.empty and snooping_audit["status"].isin(["review", "fail"]).any():
         warnings.append("Data-snooping audit found review/fail items. Treat optimized performance with a haircut.")
+    oos_audit = out_of_sample_audit_frame(data, normalized, summary) if bool(normalized["out_of_sample_check"].get("enabled", True)) else pd.DataFrame()
+    if not oos_audit.empty and oos_audit["status"].isin(["review", "fail"]).any():
+        warnings.append("Out-of-sample audit found review/fail items. Check whether test-period performance is robust.")
     metrics_detail = abu_style_metrics(equity_curve, trades, data.reset_index())
     summary.update({f"ABU {key}": value for key, value in metrics_detail.items() if value is not None})
     ump_verdict = evaluate_ump_lite(raw_data, equity_curve, trades, normalized["risk_judge"])
@@ -524,6 +537,7 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
         lookahead_audit=lookahead_audit,
         lookahead_details=lookahead_details,
         snooping_audit=snooping_audit,
+        out_of_sample_audit=oos_audit,
     )
 
 

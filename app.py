@@ -1393,6 +1393,13 @@ def page_backtest_lab(prices, crypto):
                 unsafe_allow_html=True,
             )
             named_table("Data-snooping bias audit", result.snooping_audit)
+        if result.out_of_sample_audit is not None and not result.out_of_sample_audit.empty:
+            worst_status = "FAIL" if result.out_of_sample_audit["status"].eq("fail").any() else "REVIEW" if result.out_of_sample_audit["status"].eq("review").any() else "PASS"
+            st.markdown(
+                f'<div class="runjin-note">Out-of-sample audit: <strong>{worst_status}</strong>. The same final parameters are tested on a reserved recent segment to see whether performance survives outside the training period.</div>',
+                unsafe_allow_html=True,
+            )
+            named_table("Out-of-sample audit", result.out_of_sample_audit)
 
         equity = result.equity_curve.copy()
         date_col = "Date" if "Date" in equity.columns else equity.columns[0]
