@@ -16,6 +16,18 @@ from src.data_sources.loaders import (
 )
 from src.data_sources.finance_mcp import load_finance_mcp_capabilities, load_finance_mcp_research
 from src.data_sources.market_universe import ensure_market_universe_columns
+from src.ashare_workbench.levels import key_price_levels
+from src.market_workbench.core import (
+    STRATEGY_DESCRIPTIONS,
+    add_market_indicators,
+    filter_screener,
+    latest_snapshot as market_latest_snapshot,
+    market_rotation,
+    monitor_verdict,
+    screen_market,
+    surge_ladder,
+)
+from src.market_workbench.data import build_market_workbench_data
 from src.backtest_lab.engine import (
     BACKTEST_SYSTEM_MAP,
     BacktestEngineUnavailable,
@@ -786,56 +798,178 @@ def page_watchlist(scored):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def page_finance_mcp_radar(finance_research, scored, source_status):
+def plot_market_kline(symbol_df, ticker, market):
+    fig = go.Figure()
+    fig.add_trace(
+        go.Candlestick(
+            x=symbol_df["date"],
+            open=symbol_df["open"],
+            high=symbol_df["high"],
+            low=symbol_df["low"],
+            close=symbol_df["close"],
+            name="OHLC",
+            increasing_line_color="#2ed17c",
+            increasing_fillcolor="rgba(46,209,124,0.50)",
+            decreasing_line_color="#ff5f64",
+            decreasing_fillcolor="rgba(255,95,100,0.50)",
+        )
+    )
+    for ma, color in [("ma20", "#d8cb5f"), ("ma60", "#a891ff"), ("ma120", "#ff78b7")]:
+        if ma in symbol_df:
+            fig.add_trace(go.Scatter(x=symbol_df["date"], y=symbol_df[ma], name=ma.upper(), line=dict(width=1.4, color=color)))
+    fig.update_layout(title=f"{ticker} {market} K-line / research only", height=430)
+    style_figure(fig, 430, time_axis=True)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def page_finance_mcp_radar(finance_research, scored, source_status, prices, crypto):
     page_header(
-        "Finance MCP / Data Edge Radar",
-        "全市场情报雷达",
-        "A research-only layer inspired by FinanceMCP: market news, macro calendar, money flow, index membership, fundamentals, China-market candidates, crypto context, and technical signals are collected before they become trade decisions.",
-        ["Research only", "Multi-source", "No auto orders"],
+        "Data Edge Radar / Multi-Market Quant Desk",
+        "全市场情报 + 多市场智能量化工作台",
+        "FinanceMCP-style intelligence remains the macro data edge; TickFlow-style screening, rotation, surge ladders, key levels, and monitor rules now cover A-share, US stocks, Hong Kong stocks, and crypto in one research-only workspace.",
+        ["A / US / HK / Crypto", "Offline ready", "No auto orders"],
     )
 
     status = source_status.get("finance_mcp", {})
     st.markdown(
-        f'<div class="runjin-note">FinanceMCP adapter: {status.get("mode", "unknown")} / {status.get("source", "unknown")} / {status.get("message", "")}</div>',
+        f'<div class="runjin-note">FinanceMCP adapter: {status.get("mode", "unknown")} / {status.get("source", "unknown")} / {status.get("message", "")}. Multi-market workbench uses bundled samples by default and is research-only.</div>',
         unsafe_allow_html=True,
     )
 
-    capabilities = load_finance_mcp_capabilities()
-    named_table("FinanceMCP capability map", capabilities)
+    market_prices, market_meta = build_market_workbench_data(prices, crypto)
+    enriched = add_market_indicators(market_prices, market_meta)
+    screened = screen_market(enriched)
+    rotation = market_rotation(enriched)
+    ladder = surge_ladder(enriched)
+    markets = ["ALL"] + [item for item in ["A_SHARE", "US", "HK", "CRYPTO"] if item in set(enriched["market"])]
 
-    domains = sorted(finance_research["domain"].dropna().unique())
-    tickers = ["ALL"] + sorted(finance_research["symbol"].dropna().unique())
-    col1, col2, col3 = st.columns([1.2, 1.1, 1])
-    selected_domains = col1.multiselect("Research domains", domains, default=domains)
-    selected_symbol = col2.selectbox("Symbol", tickers)
-    min_importance = col3.slider("Min importance", 1, 5, 3)
+    section = st.radio(
+        "Workbench section",
+        ["智能选股", "情绪/突破梯队", "板块轮动", "关键价位", "监控规则", "Research Radar"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
 
-    view = finance_research.loc[
-        finance_research["domain"].isin(selected_domains)
-        & (finance_research["importance"] >= min_importance)
-    ].copy()
-    if selected_symbol != "ALL":
-        view = view.loc[view["symbol"] == selected_symbol]
+    if section == "智能选股":
+        strategy_options = ["ALL"] + list(STRATEGY_DESCRIPTIONS.keys())
+        col1, col2, col3, col4 = st.columns([0.9, 1.2, 1, 1])
+        market_filter = col1.selectbox("Market", markets)
+        strategy = col2.selectbox("Strategy template", strategy_options)
+        min_score = col3.slider("Min signal score", 0, 60, 24)
+        concept_options = ["ALL"] + sorted(screened.loc[screened["market"].eq(market_filter) if market_filter != "ALL" else screened["market"].notna(), "concept"].dropna().unique().tolist())
+        concept_filter = col4.selectbox("Theme", concept_options)
+        view = filter_screener(screened, market_filter, strategy, min_score)
+        if concept_filter != "ALL":
+            view = view.loc[view["concept"] == concept_filter]
+        description = STRATEGY_DESCRIPTIONS.get(strategy, "显示所有 TickFlow-style 选股模板命中的多市场候选。")
+        st.markdown(f'<div class="runjin-note">{description}</div>', unsafe_allow_html=True)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Candidates", fmt_int(len(view)))
+        col2.metric("Avg score", fmt_number(view["score"].mean() if not view.empty else 0, 0))
+        col3.metric("Surge hits", fmt_int(view["strong_surge"].sum() if not view.empty else 0))
+        col4.metric("Markets", fmt_int(view["market"].nunique() if not view.empty else 0))
+        table_cols = ["market", "ticker", "company", "concept", "score", "strategies", "reasons", "close", "return_1d", "momentum_20", "volume_ratio", "rsi14", "volatility_20"]
+        named_table("Multi-market TickFlow-style screener", view[table_cols].round(4) if not view.empty else pd.DataFrame([{"note": "No candidates match current filters"}]))
+        if not view.empty:
+            top = view.head(12)
+            fig = go.Figure(go.Bar(x=top["ticker"], y=top["score"], marker_color="#2ed17c", text=top["market"] + " / " + top["concept"]))
+            fig.update_layout(title="Top multi-market signal scores", yaxis_title="Score")
+            style_figure(fig, 330)
+            st.plotly_chart(fig, use_container_width=True)
 
-    watch_symbols = set(scored["ticker"].tolist()) | {"BTC-USD", "ETH-USD", "MARKET"}
-    watch_hits = view.loc[view["symbol"].isin(watch_symbols)].copy()
+    elif section == "情绪/突破梯队":
+        market_filter = st.selectbox("Market", markets, key="surge_market")
+        view = ladder if market_filter == "ALL" else ladder.loc[ladder["market"] == market_filter]
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Triggered symbols", fmt_int((view["surge_streak"] > 0).sum()))
+        col2.metric("Max streak", fmt_int(view["surge_streak"].max() if not view.empty else 0))
+        col3.metric("Hot themes", fmt_int(view.loc[view["surge_streak"] > 0, "concept"].nunique() if not view.empty else 0))
+        st.markdown(
+            '<div class="runjin-note">A股显示涨停/连板语义；美股、港股、加密货币使用强势上涨、放量和60日新高构造突破梯队。这是情绪研究，不生成交易指令。</div>',
+            unsafe_allow_html=True,
+        )
+        named_table("Surge / breakout ladder", view.round(4))
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Signals", fmt_int(len(view)))
-    col2.metric("Watchlist hits", fmt_int(len(watch_hits)))
-    col3.metric("High importance", fmt_int((view["importance"] >= 4).sum()))
-    col4.metric("Domains", fmt_int(view["domain"].nunique()))
+    elif section == "板块轮动":
+        market_filter = st.selectbox("Market", markets, key="rotation_market")
+        view = rotation if market_filter == "ALL" else rotation.loc[rotation["market"] == market_filter]
+        named_table("Theme rotation", view.round(4))
+        if not view.empty:
+            fig = go.Figure()
+            x_labels = view["market"] + " / " + view["concept"]
+            fig.add_trace(go.Bar(x=x_labels, y=view["avg_20d"], name="20D return", marker_color="#2ed17c"))
+            fig.add_trace(go.Scatter(x=x_labels, y=view["avg_volume_ratio"], name="Volume ratio", yaxis="y2", line=dict(color="#d8cb5f", width=2)))
+            fig.update_layout(title="Theme rotation: price momentum + volume heat", yaxis_title="20D return", yaxis2=dict(overlaying="y", side="right", title="Volume ratio"))
+            style_figure(fig, 380)
+            st.plotly_chart(fig, use_container_width=True)
 
-    if not view.empty:
-        domain_counts = view.groupby("domain", as_index=False)["importance"].sum().sort_values("importance", ascending=False)
-        fig = go.Figure(go.Bar(x=domain_counts["domain"], y=domain_counts["importance"], marker_color="#2ed17c"))
-        fig.update_layout(title="Research pressure by domain", yaxis_title="Importance score")
-        style_figure(fig, 340)
-        st.plotly_chart(fig, use_container_width=True)
+    elif section == "关键价位":
+        market_filter = st.selectbox("Market", [item for item in markets if item != "ALL"], key="levels_market")
+        tickers = sorted(enriched.loc[enriched["market"] == market_filter, "ticker"].unique())
+        default_symbol = {"A_SHARE": "688981", "US": "NVDA", "HK": "0700.HK", "CRYPTO": "BTC-USD"}.get(market_filter, tickers[0])
+        default_idx = tickers.index(default_symbol) if default_symbol in tickers else 0
+        ticker = st.selectbox("Symbol", tickers, index=default_idx)
+        symbol_df = enriched.loc[enriched["ticker"] == ticker].copy()
+        plot_market_kline(symbol_df.tail(180), ticker, market_filter)
+        levels = key_price_levels(symbol_df)
+        col1, col2 = st.columns([1.2, 1])
+        with col1:
+            named_table("Key price levels", levels.round(4))
+        with col2:
+            latest = symbol_df.tail(1).iloc[0]
+            verdict = monitor_verdict(latest)
+            st.metric("Monitor status", verdict["status"].upper())
+            st.markdown(f'<div class="runjin-note">{verdict["alerts"]}</div>', unsafe_allow_html=True)
+            snapshot_cols = ["date", "close", "ma20", "ma60", "ma120", "rsi14", "volume_ratio", "atr_pct", "momentum_20", "momentum_60"]
+            named_table("Latest signal snapshot", symbol_df[snapshot_cols].tail(1).round(4))
 
-    named_table("Filtered research radar", view)
-    if not watch_hits.empty:
-        named_table("Watchlist-linked signals", watch_hits)
+    elif section == "监控规则":
+        market_filter = st.selectbox("Market", markets, key="monitor_market")
+        latest = market_latest_snapshot(enriched)
+        if market_filter != "ALL":
+            latest = latest.loc[latest["market"] == market_filter]
+        verdicts = latest.apply(lambda row: monitor_verdict(row), axis=1, result_type="expand")
+        monitor = pd.concat([latest[["market", "ticker", "company", "concept", "date", "close", "rsi14", "volume_ratio", "volatility_20", "strong_surge"]].reset_index(drop=True), verdicts], axis=1)
+        status_filter = st.selectbox("Status", ["ALL"] + sorted(monitor["status"].unique().tolist()))
+        if status_filter != "ALL":
+            monitor = monitor.loc[monitor["status"] == status_filter]
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Monitor rows", fmt_int(len(monitor)))
+        col2.metric("Review/Risk", fmt_int(monitor["status"].isin(["review", "risk"]).sum()))
+        col3.metric("Volume alerts", fmt_int((monitor["volume_ratio"] >= 2).sum()))
+        named_table("Multi-market monitor rules", monitor.sort_values(["status", "volume_ratio"], ascending=[True, False]).round(4))
+
+    else:
+        capabilities = load_finance_mcp_capabilities()
+        named_table("FinanceMCP capability map", capabilities)
+        domains = sorted(finance_research["domain"].dropna().unique())
+        tickers = ["ALL"] + sorted(finance_research["symbol"].dropna().unique())
+        col1, col2, col3 = st.columns([1.2, 1.1, 1])
+        selected_domains = col1.multiselect("Research domains", domains, default=domains)
+        selected_symbol = col2.selectbox("Symbol", tickers)
+        min_importance = col3.slider("Min importance", 1, 5, 3)
+        view = finance_research.loc[
+            finance_research["domain"].isin(selected_domains)
+            & (finance_research["importance"] >= min_importance)
+        ].copy()
+        if selected_symbol != "ALL":
+            view = view.loc[view["symbol"] == selected_symbol]
+        watch_symbols = set(scored["ticker"].tolist()) | {"BTC-USD", "ETH-USD", "MARKET"}
+        watch_hits = view.loc[view["symbol"].isin(watch_symbols)].copy()
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Signals", fmt_int(len(view)))
+        col2.metric("Watchlist hits", fmt_int(len(watch_hits)))
+        col3.metric("High importance", fmt_int((view["importance"] >= 4).sum()))
+        col4.metric("Domains", fmt_int(view["domain"].nunique()))
+        if not view.empty:
+            domain_counts = view.groupby("domain", as_index=False)["importance"].sum().sort_values("importance", ascending=False)
+            fig = go.Figure(go.Bar(x=domain_counts["domain"], y=domain_counts["importance"], marker_color="#2ed17c"))
+            fig.update_layout(title="Research pressure by domain", yaxis_title="Importance score")
+            style_figure(fig, 340)
+            st.plotly_chart(fig, use_container_width=True)
+        named_table("Filtered research radar", view)
+        if not watch_hits.empty:
+            named_table("Watchlist-linked signals", watch_hits)
 
 
 def page_stock_detail(prices, financials, scored, forecasts, data_mode):
@@ -1539,7 +1673,7 @@ def main():
     elif page == "Long Watchlist":
         page_watchlist(scored)
     elif page == "Finance MCP Radar":
-        page_finance_mcp_radar(finance_research, scored, source_status)
+        page_finance_mcp_radar(finance_research, scored, source_status, prices, crypto)
     elif page == "Symbol Cockpit":
         page_symbol_cockpit(prices, crypto, financials, scored, forecasts, data_mode)
     elif page == "Stock Detail":

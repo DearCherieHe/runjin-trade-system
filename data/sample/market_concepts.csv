@@ -1,0 +1,21 @@
+market,ticker,company,concept,currency,asset_class
+US,NVDA,NVIDIA,AI Semiconductors,USD,equity
+US,TSLA,Tesla,EV / Energy,USD,equity
+US,SNDK,SanDisk,Storage / Memory,USD,equity
+US,PLTR,Palantir,AI Software,USD,equity
+US,AMD,Advanced Micro Devices,AI Semiconductors,USD,equity
+US,AVGO,Broadcom,AI Infrastructure,USD,equity
+US,TSM,Taiwan Semiconductor,Semiconductor Foundry,USD,equity
+US,ARM,Arm Holdings,Chip IP,USD,equity
+US,SOUN,SoundHound AI,Voice AI,USD,equity
+US,CRWV,CoreWeave,AI Cloud,USD,equity
+HK,0700.HK,Tencent,China Internet,HKD,equity
+HK,9988.HK,Alibaba,China Internet,HKD,equity
+HK,3690.HK,Meituan,Local Services,HKD,equity
+HK,1810.HK,Xiaomi,Smart Hardware,HKD,equity
+HK,1211.HK,BYD,EV / Battery,HKD,equity
+HK,9618.HK,JD.com,E-commerce,HKD,equity
+HK,1299.HK,AIA,Insurance,HKD,equity
+HK,0388.HK,HKEX,Exchange / Financials,HKD,equity
+CRYPTO,BTC-USD,Bitcoin,Digital Store of Value,USD,crypto
+CRYPTO,ETH-USD,Ethereum,Smart Contract Platform,USD,crypto

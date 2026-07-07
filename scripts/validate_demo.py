@@ -17,6 +17,20 @@ from src.data_sources.loaders import (
 )
 from src.data_sources.finance_mcp import load_finance_mcp_capabilities, load_finance_mcp_research
 from src.data_sources.market_universe import ensure_market_universe_columns
+from src.ashare_workbench.indicators import add_ashare_indicators
+from src.ashare_workbench.levels import key_price_levels, monitor_verdict
+from src.ashare_workbench.rotation import concept_rotation, limit_up_ladder
+from src.ashare_workbench.sample_data import load_ashare_concepts, load_ashare_prices
+from src.ashare_workbench.screener import STRATEGY_DESCRIPTIONS, filter_screener, screen_ashare
+from src.market_workbench.core import (
+    add_market_indicators,
+    filter_screener as filter_market_screener,
+    market_rotation,
+    monitor_verdict as market_monitor_verdict,
+    screen_market,
+    surge_ladder,
+)
+from src.market_workbench.data import build_market_workbench_data
 from src.backtest_lab.engine import (
     BacktestEngineUnavailable,
     DEFAULT_STRATEGY_SPEC,
@@ -108,6 +122,46 @@ def main():
     assert_true(not finance_research.empty, "FinanceMCP research radar is empty")
     assert_true(not finance_capabilities.empty, "FinanceMCP capability map is empty")
     assert_true(finance_status["mode"] in {"sample", "external_csv", "mcp_ready_sample_fallback"}, "Invalid FinanceMCP status")
+
+    ashare_prices = load_ashare_prices()
+    ashare_concepts = load_ashare_concepts()
+    ashare_enriched = add_ashare_indicators(ashare_prices, ashare_concepts)
+    ashare_screen = screen_ashare(ashare_enriched)
+    ashare_rotation = concept_rotation(ashare_enriched, ashare_concepts)
+    ashare_ladder = limit_up_ladder(ashare_enriched)
+    assert_true(not ashare_prices.empty, "A-share sample OHLCV is empty")
+    assert_true(ashare_prices["ticker"].nunique() >= 12, "A-share sample universe is too small")
+    for col in ["ma20", "ma60", "ma120", "macd", "rsi14", "kdj_k", "bb_upper", "atr14", "volume_ratio", "limit_up", "new_60d_high"]:
+        assert_true(col in ashare_enriched.columns and ashare_enriched[col].notna().sum() > 0, f"A-share indicator {col} is empty")
+    assert_true(not ashare_screen.empty, "A-share screener returned no rows")
+    assert_true({"ticker", "score", "strategies", "reasons"}.issubset(ashare_screen.columns), "A-share screener missing expected columns")
+    assert_true(not filter_screener(ashare_screen, "ALL", 20).empty, "A-share screener score filter removed all rows")
+    assert_true("trend_breakout" in STRATEGY_DESCRIPTIONS, "A-share strategy descriptions missing trend_breakout")
+    assert_true(not ashare_rotation.empty, "A-share concept rotation returned no rows")
+    assert_true(not ashare_ladder.empty and "limit_streak" in ashare_ladder.columns, "A-share limit-up ladder returned no rows")
+    assert_true(ashare_ladder["limit_streak"].max() >= 1, "A-share limit-up ladder did not detect injected limit-up events")
+    levels = key_price_levels(ashare_enriched.loc[ashare_enriched["ticker"] == "688981"].copy())
+    assert_true(not levels.empty and {"level", "price", "type"}.issubset(levels.columns), "A-share key levels returned no rows")
+    verdict = monitor_verdict(ashare_enriched.loc[ashare_enriched["ticker"] == "688981"].tail(1).iloc[0])
+    assert_true(verdict["status"] in {"watch", "review", "risk"}, "A-share monitor verdict invalid")
+
+    market_prices, market_meta = build_market_workbench_data(prices, crypto)
+    market_enriched = add_market_indicators(market_prices, market_meta)
+    market_screen = screen_market(market_enriched)
+    market_rotation_view = market_rotation(market_enriched)
+    market_ladder = surge_ladder(market_enriched)
+    assert_true({"A_SHARE", "US", "HK", "CRYPTO"}.issubset(set(market_enriched["market"])), "Multi-market workbench missing required markets")
+    assert_true(not market_screen.empty and {"market", "ticker", "score", "strategies"}.issubset(market_screen.columns), "Multi-market screener failed")
+    for market_name in ["A_SHARE", "US", "HK", "CRYPTO"]:
+        assert_true(not filter_market_screener(market_screen, market_name, "ALL", 10).empty, f"Multi-market screener empty for {market_name}")
+    assert_true(not market_rotation_view.empty and {"market", "concept", "avg_20d", "leaders"}.issubset(market_rotation_view.columns), "Multi-market rotation failed")
+    assert_true(not market_ladder.empty and "surge_streak" in market_ladder.columns, "Multi-market surge ladder failed")
+    assert_true((market_ladder["surge_streak"] >= 1).any(), "Multi-market surge ladder did not detect injected events")
+    for ticker in ["NVDA", "0700.HK", "BTC-USD"]:
+        symbol_levels = key_price_levels(market_enriched.loc[market_enriched["ticker"] == ticker].copy())
+        assert_true(not symbol_levels.empty, f"Multi-market key levels empty for {ticker}")
+        market_verdict = market_monitor_verdict(market_enriched.loc[market_enriched["ticker"] == ticker].tail(1).iloc[0])
+        assert_true(market_verdict["status"] in {"watch", "review", "risk"}, f"Multi-market monitor invalid for {ticker}")
 
     strategy_spec = load_strategy_spec(DEFAULT_STRATEGY_SPEC)
     prepared = prepare_ohlcv(prices.loc[prices["ticker"] == "NVDA"].copy(), "date")

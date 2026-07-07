@@ -79,15 +79,20 @@ The Stock Detail and K-line Lab pages support:
 - KDJ, RSI, MACD, Bollinger Bands, moving averages, volatility, and relative strength
 - coverage notes so live/free-source limits are visible
 
-## Finance MCP Radar
+## Data Edge Radar / Multi-Market Quant Desk
 
-The `Finance MCP Radar` page turns FinanceMCP-style capabilities into a research-only layer:
+The `Finance MCP Radar` sidebar entry now acts as one combined intelligence workbench:
 
 - market news, macro calendar, money flow, index/constituent context, fundamentals, valuation, China-market candidates, and crypto context
 - source/status visibility in the Dashboard data-source table
 - sample-first operation so Streamlit starts without API keys
 - optional external research CSV path through `FINANCE_MCP_RESEARCH_CSV`
 - optional MCP/HTTP service pointer through `FINANCE_MCP_HTTP_URL`
+- TickFlow-inspired screener, theme rotation, A-share limit-up ladder, US/HK/crypto surge ladder, key price levels, and monitor rules
+- offline A-share OHLCV and concept samples under `data/sample/ashare_*.csv`
+- offline Hong Kong OHLCV and multi-market theme samples under `data/sample/hk_ohlcv.csv` and `data/sample/market_concepts.csv`
+
+See `docs/tickflow_reuse_audit.md` for the integration boundary and reused ideas.
 
 ## Backtest Lab
 
