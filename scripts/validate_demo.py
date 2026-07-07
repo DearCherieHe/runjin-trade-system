@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -34,6 +36,10 @@ from src.long_term.scoring import SCORE_COLUMNS, build_score_table
 from src.quant_bot.paper_trader import run_crypto_paper, run_us_stock_paper
 from src.quant_bot.risk import evaluate_risk
 from src.reports.weekly_report import build_weekly_report
+from src.trade_skills.capital_rotation import cohort_rotation
+from src.trade_skills.intraday import intraday_signal_pack
+from src.trade_skills.journal import build_markdown_note, default_deep_dive_sections
+from src.trade_skills.sepa import sepa_dashboard, sepa_entry_plan
 
 
 def assert_true(condition, message):
@@ -150,6 +156,19 @@ def main():
     assert_true(not atr_view.empty and atr_view["atr_pct"].notna().sum() > 0, "ATR research returned empty data")
     assert_true(not corr.empty, "Rolling correlation matrix returned empty data")
     assert_true(not similar.empty, "Similar path research returned empty data")
+
+    sepa = sepa_dashboard(nvda_raw, prices.loc[prices["ticker"] == "TSLA"].copy())
+    assert_true(not sepa["summary"].empty, "Trade Skills SEPA summary returned empty data")
+    assert_true(not sepa_entry_plan(sepa["levels"]).empty, "Trade Skills SEPA entry plan returned empty data")
+    intraday = intraday_signal_pack(crypto.loc[crypto["symbol"] == "BTC-USD"].copy())
+    assert_true(not intraday["signals"].empty, "Trade Skills intraday signals returned empty data")
+    assert_true(not intraday["scenarios"].empty, "Trade Skills intraday scenarios returned empty data")
+    rotation = cohort_rotation(prices)
+    assert_true(not rotation["scores"].empty, "Trade Skills capital rotation scores returned empty data")
+    assert_true(not rotation["curves"].empty, "Trade Skills capital rotation curves returned empty data")
+    journal_sections = default_deep_dive_sections("NVDA", scored.loc[scored["ticker"] == "NVDA"].iloc[0].to_dict())
+    note = build_markdown_note("NVDA", pd.DataFrame(journal_sections))
+    assert_true("NVDA Deep Dive" in note and "Business identity" in note, "Trade Skills journal note generation failed")
 
     report = build_weekly_report(
         scored,

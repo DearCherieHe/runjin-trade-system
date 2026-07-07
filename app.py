@@ -34,6 +34,10 @@ from src.long_term.scoring import SCORE_COLUMNS, build_score_table
 from src.long_term.thesis import get_ticker_profile, latest_financial_snapshot
 from src.quant_bot.paper_trader import run_crypto_paper, run_us_stock_paper
 from src.reports.weekly_report import build_weekly_report
+from src.trade_skills.capital_rotation import cohort_rotation
+from src.trade_skills.intraday import intraday_signal_pack
+from src.trade_skills.journal import build_markdown_note, default_deep_dive_sections, list_journal_entries
+from src.trade_skills.sepa import sepa_dashboard, sepa_entry_plan
 
 
 ROOT = Path(__file__).resolve().parent
@@ -981,6 +985,174 @@ def page_kline_lab(prices, forecasts, market_universe, data_mode):
         named_table("Similar recent paths", similar_view.round(3) if not similar_view.empty else pd.DataFrame([{"note": "Not enough comparable history"}]))
 
 
+def page_symbol_cockpit(prices, crypto, financials, scored, forecasts, data_mode):
+    page_header(
+        "Trade Skills / Symbol Cockpit",
+        "个股驾驶舱",
+        "A one-name operating page inspired by trade-skills: thesis, SEPA trend template, K-line replay, intraday scenario, and journal prompts stay in one place so each decision has context.",
+        ["Prediction", "Environment", "Review", "Note", "Research only"],
+    )
+    ticker = st.selectbox("Symbol", scored["ticker"].tolist(), key="cockpit_ticker")
+    profile, ticker_financials = get_ticker_profile(scored, financials, ticker)
+    timeframe, as_of, show_forecast = kline_controls(prices, ticker, "cockpit", data_mode)
+    raw_kline, source_note = build_ticker_kline(prices, ticker, timeframe, as_of, data_mode)
+    if raw_kline.empty:
+        st.warning(source_note)
+        return
+    ticker_prices = add_indicators(raw_kline)
+    use_forecast = show_forecast and timeframe == "1D" and ticker in set(forecasts["ticker"])
+    forecast = filter_forecast_for_chart(forecasts.loc[forecasts["ticker"] == ticker], ticker_prices) if use_forecast else pd.DataFrame()
+
+    tabs = st.tabs(["Prediction", "Environment", "Review", "Note"])
+    with tabs[0]:
+        plot_kline(ticker_prices, f"{ticker} cockpit K-line / {timeframe} / Replay as of {as_of}", forecast)
+        benchmark = prices.loc[prices["ticker"] == "NVDA"].copy()
+        sepa = sepa_dashboard(ticker_prices, benchmark if ticker != "NVDA" else pd.DataFrame())
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("SEPA verdict", sepa["verdict"])
+        latest_rsi = ticker_prices["rsi14"].dropna()
+        c2.metric("RSI", f"{latest_rsi.iloc[-1]:.0f}" if not latest_rsi.empty else "N/A")
+        c3.metric("Regime", classify_regime(ticker_prices))
+        c4.metric("Bars", fmt_int(len(ticker_prices)))
+        named_table("SEPA trend checks", sepa["checks"] if not sepa["checks"].empty else sepa["summary"])
+    with tabs[1]:
+        snapshot = latest_financial_snapshot(ticker_financials)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Score", profile["score_label"])
+        col2.metric("Revenue growth", fmt_pct(snapshot["revenue_growth_yoy"]))
+        col3.metric("Gross margin", fmt_pct(snapshot["gross_margin"]))
+        col4.metric("OCF margin", fmt_pct(snapshot["operating_cash_flow_margin"]))
+        named_table("Financial proof", ticker_financials)
+        st.markdown(f'<div class="runjin-note">Data coverage: {coverage_summary(ticker_prices)} / {source_note}</div>', unsafe_allow_html=True)
+    with tabs[2]:
+        st.markdown(f'<div class="runjin-thesis"><h4>Narrative</h4><p>{profile["narrative"]}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="runjin-thesis"><h4>Invalidation</h4><p>{profile["invalidation"]}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="runjin-thesis"><h4>Buy Plan</h4><p>{profile["buy_plan"]}</p></div>', unsafe_allow_html=True)
+    with tabs[3]:
+        sections = pd.DataFrame(default_deep_dive_sections(ticker, profile))
+        named_table("Deep-dive journal prompts", sections)
+        st.text_area("Markdown note draft", value=build_markdown_note(ticker, sections), height=360, key="cockpit_note_draft")
+
+
+def page_sepa_lab(prices):
+    page_header(
+        "Trade Skills / SEPA Lab",
+        "SEPA 趋势模板",
+        "A Minervini-style trend template rebuilt locally for RunJin. It checks 50/150/200MA structure, 52-week location, volume context, and relative strength before a stock becomes a serious breakout candidate.",
+        ["50MA", "150MA", "200MA", "52W", "Relative strength"],
+    )
+    ticker = st.selectbox("Ticker", sorted(prices["ticker"].unique()), index=0, key="sepa_ticker")
+    benchmark_ticker = st.selectbox("Benchmark", sorted(prices["ticker"].unique()), index=0, key="sepa_benchmark")
+    data = prices.loc[prices["ticker"] == ticker].copy()
+    benchmark = prices.loc[prices["ticker"] == benchmark_ticker].copy() if benchmark_ticker != ticker else pd.DataFrame()
+    result = sepa_dashboard(data, benchmark)
+    levels = result["levels"]
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Verdict", result["verdict"])
+    col2.metric("Passes", fmt_int((result["checks"]["status"] == "pass").sum()) if not result["checks"].empty else "N/A")
+    col3.metric("Fails", fmt_int((result["checks"]["status"] == "fail").sum()) if not result["checks"].empty else "N/A")
+    col4.metric("Bars", fmt_int(len(levels)))
+    if not levels.empty:
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(x=levels["date"], open=levels["open"], high=levels["high"], low=levels["low"], close=levels["close"], name="OHLC"))
+        for col, color in [("ma50", "#2ed17c"), ("ma150", "#d8cb5f"), ("ma200", "#a891ff")]:
+            if col in levels:
+                fig.add_trace(go.Scatter(x=levels["date"], y=levels[col], name=col.upper(), line=dict(color=color, width=1.4)))
+        fig.update_layout(title=f"{ticker} SEPA structure")
+        style_figure(fig, 440, time_axis=True)
+        st.plotly_chart(fig, use_container_width=True)
+    named_table("SEPA checks", result["checks"] if not result["checks"].empty else result["summary"])
+    named_table("Hypothetical entry plan", sepa_entry_plan(levels))
+
+
+def page_intraday_signal(prices, crypto, data_mode):
+    page_header(
+        "Trade Skills / Intraday Signal",
+        "盘中多周期信号",
+        "A 5m/15m/1h-style scenario desk. V0.1 uses live hourly data when available and falls back to bundled hourly crypto data; lower timeframes are clearly labeled as proxies when source granularity is not fine enough.",
+        ["5m proxy", "15m proxy", "1h", "Risk gate"],
+    )
+    asset_class = st.radio("Asset class", ["Crypto hourly", "US stock hourly/live"], horizontal=True, key="intraday_asset")
+    if asset_class == "Crypto hourly":
+        if crypto.empty:
+            st.warning("Crypto hourly data is unavailable.")
+            return
+        symbol = st.selectbox("Symbol", sorted(crypto["symbol"].unique()), key="intraday_crypto")
+        data = crypto.loc[crypto["symbol"] == symbol].copy()
+        title = symbol
+        time_col = "datetime"
+    else:
+        symbol = st.selectbox("Ticker", sorted(prices["ticker"].unique()), key="intraday_stock")
+        try:
+            data = fetch_yfinance_prices([symbol], period="730d", interval="1h") if data_mode in {"live", "live_auto"} else prices.loc[prices["ticker"] == symbol].copy()
+        except Exception as exc:
+            if data_mode == "live":
+                raise
+            st.warning(f"Hourly source unavailable for {symbol}; using daily bars as a coarse proxy. {exc}")
+            data = prices.loc[prices["ticker"] == symbol].copy()
+        title = symbol
+        time_col = "date"
+    pack = intraday_signal_pack(data)
+    if pack["signals"].empty:
+        named_table("Risk gate", pack["risk_gate"])
+        return
+    col1, col2, col3 = st.columns(3)
+    primary = pack["scenarios"].iloc[0]
+    col1.metric("Primary direction", primary["direction"])
+    col2.metric("Probability", f"{primary['probability']:.0f}%")
+    col3.metric("Bars", fmt_int(len(data)))
+    chart_data = data.copy()
+    chart_data[time_col] = pd.to_datetime(chart_data[time_col], errors="coerce")
+    fig = go.Figure(go.Candlestick(x=chart_data[time_col], open=chart_data["open"], high=chart_data["high"], low=chart_data["low"], close=chart_data["close"], name="OHLC"))
+    fig.update_layout(title=f"{title} intraday source chart")
+    style_figure(fig, 390, time_axis=True)
+    st.plotly_chart(fig, use_container_width=True)
+    named_table("Multi-timeframe signals", pack["signals"])
+    named_table("Scenario plan", pack["scenarios"])
+    named_table("Risk gate", pack["risk_gate"])
+
+
+def page_capital_rotation(prices):
+    page_header(
+        "Trade Skills / Capital Rotation",
+        "资金轮动雷达",
+        "Cohort-level flow comparison for retail-friendly narrative tracking: semiconductors, AI software, EV/autonomy, AI cloud, and storage are compared by normalized price flow and breadth.",
+        ["Cohort flow", "Breadth", "Narrative label"],
+    )
+    lookback = st.slider("Lookback bars", 21, 126, 63, step=21)
+    result = cohort_rotation(prices, lookback=lookback)
+    st.markdown(f'<div class="runjin-note">Rotation label: <strong>{result["label"]}</strong>. Price flow is a research proxy, not fund-flow truth.</div>', unsafe_allow_html=True)
+    curves = result["curves"]
+    if not curves.empty:
+        fig = go.Figure()
+        for col in [c for c in curves.columns if c != "date"]:
+            fig.add_trace(go.Scatter(x=curves["date"], y=curves[col], name=col))
+        fig.update_layout(title="Normalized cohort flow", yaxis_title="Indexed performance")
+        style_figure(fig, 430, time_axis=True)
+        st.plotly_chart(fig, use_container_width=True)
+    scores = result["scores"].copy()
+    if not scores.empty:
+        scores["lookback_return"] = scores["lookback_return"].map(lambda value: f"{value:.1%}")
+        scores["positive_breadth"] = scores["positive_breadth"].map(lambda value: f"{value:.0%}")
+    named_table("Cohort rotation scores", scores)
+
+
+def page_research_journal(scored):
+    page_header(
+        "Trade Skills / Research Journal",
+        "研究日志",
+        "A durable note layer for stock deep dives. The current V0.1 generates structured prompts and markdown drafts; writing to disk can be added once you approve the exact note workflow.",
+        ["Business", "Fundamentals", "Technicals", "Catalysts", "Invalidation"],
+    )
+    ticker = st.selectbox("Ticker", scored["ticker"].tolist(), key="journal_ticker")
+    profile = scored.loc[scored["ticker"] == ticker].iloc[0].to_dict()
+    sections = pd.DataFrame(default_deep_dive_sections(ticker, profile))
+    named_table("Six-lens deep dive", sections)
+    st.text_area("Markdown draft", value=build_markdown_note(ticker, sections), height=420, key="journal_draft")
+    entries = list_journal_entries()
+    named_table("Existing journal entries", entries if not entries.empty else pd.DataFrame([{"note": "No local journal markdown files yet"}]))
+
+
 def page_backtest_lab(prices, crypto):
     page_header(
         "Backtest Lab / Strategy Proof",
@@ -1268,7 +1440,22 @@ def main():
         st.stop()
     page = st.sidebar.radio(
         "Workspace",
-        ["Dashboard", "Market Universe", "Long Watchlist", "Finance MCP Radar", "Stock Detail", "K-line Lab", "Backtest Lab", "Short Bot", "Weekly Report"],
+        [
+            "Dashboard",
+            "Market Universe",
+            "Long Watchlist",
+            "Finance MCP Radar",
+            "Symbol Cockpit",
+            "Stock Detail",
+            "K-line Lab",
+            "SEPA Lab",
+            "Intraday Signal",
+            "Capital Rotation",
+            "Research Journal",
+            "Backtest Lab",
+            "Short Bot",
+            "Weekly Report",
+        ],
     )
     st.sidebar.caption(f"MODE / {data_mode}")
     st.sidebar.caption("BOUNDARY / V0.1 never places real orders.")
@@ -1281,10 +1468,20 @@ def main():
         page_watchlist(scored)
     elif page == "Finance MCP Radar":
         page_finance_mcp_radar(finance_research, scored, source_status)
+    elif page == "Symbol Cockpit":
+        page_symbol_cockpit(prices, crypto, financials, scored, forecasts, data_mode)
     elif page == "Stock Detail":
         page_stock_detail(prices, financials, scored, forecasts, data_mode)
     elif page == "K-line Lab":
         page_kline_lab(prices, forecasts, market_universe, data_mode)
+    elif page == "SEPA Lab":
+        page_sepa_lab(prices)
+    elif page == "Intraday Signal":
+        page_intraday_signal(prices, crypto, data_mode)
+    elif page == "Capital Rotation":
+        page_capital_rotation(prices)
+    elif page == "Research Journal":
+        page_research_journal(scored)
     elif page == "Backtest Lab":
         page_backtest_lab(prices, crypto)
     elif page == "Short Bot":
