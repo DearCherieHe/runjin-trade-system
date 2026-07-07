@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from src.backtest_lab.costs import describe_execution_assumptions, resolve_commission_rate, slippage_reference
+from src.backtest_lab.bias import lookahead_audit_frame, run_lookahead_audit
 from src.backtest_lab.metrics import abu_style_metrics, metrics_detail_frame
 from src.backtest_lab.position_sizing import resolve_position_size
 from src.backtest_lab.ump_lite import evaluate_ump_lite
@@ -18,11 +19,15 @@ cash: 100000
 commission_pct: 0.10
 commission_model: us_equity_basic
 slippage_model: hl_mean_gap_guard
+trade_on_close: false
 position_model: fixed_fraction
 benchmark: SPY
 position_size: 0.95
 stop_loss_pct: 6
 take_profit_pct: 0
+lookahead_check:
+  enabled: true
+  truncation_bars: 30
 risk_judge:
   enabled: true
   max_volatility: 0.75
@@ -182,6 +187,8 @@ class BacktestResult:
     metrics_detail: pd.DataFrame | None = None
     ump_verdict: pd.DataFrame | None = None
     slippage_detail: pd.DataFrame | None = None
+    lookahead_audit: pd.DataFrame | None = None
+    lookahead_details: pd.DataFrame | None = None
 
 
 @dataclass
@@ -342,8 +349,14 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
 
     commission_model = str(spec.get("commission_model", "pct_only")).strip() or "pct_only"
     slippage_model = str(spec.get("slippage_model", "close")).strip() or "close"
+    trade_on_close = bool(spec.get("trade_on_close", False))
+    if trade_on_close:
+        warnings.append("trade_on_close is enabled. This is valid only when the strategy can truly decide at the period close.")
     position_model = str(spec.get("position_model", "fixed_fraction")).strip() or "fixed_fraction"
     benchmark = str(spec.get("benchmark", "")).strip()
+    lookahead_check = spec.get("lookahead_check", {"enabled": True, "truncation_bars": 30}) or {}
+    if not isinstance(lookahead_check, dict):
+        raise ValueError("lookahead_check must be a YAML object.")
     position_parameters = spec.get("position_parameters", {}) or {}
     if not isinstance(position_parameters, dict):
         raise ValueError("position_parameters must be a YAML object.")
@@ -359,6 +372,7 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
         "commission": resolve_commission_rate(commission_model, commission_pct / 100),
         "commission_model": commission_model,
         "slippage_model": slippage_model,
+        "trade_on_close": trade_on_close,
         "position_model": position_model,
         "position_parameters": position_parameters,
         "benchmark": benchmark,
@@ -366,6 +380,7 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
         "stop_loss_pct": stop_loss_pct / 100,
         "take_profit_pct": take_profit_pct / 100,
         "risk_judge": risk_judge,
+        "lookahead_check": lookahead_check,
         "parameters": params,
     }
     return normalized, warnings
@@ -389,6 +404,22 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
     params = normalized["parameters"]
     normalized["position_size"] = resolve_position_size(raw_data, normalized, warnings)
     slippage_detail = slippage_reference(raw_data, normalized["slippage_model"]).tail(20)
+    lookahead_config = normalized["lookahead_check"]
+    lookahead_result = None
+    lookahead_audit = None
+    lookahead_details = None
+    if bool(lookahead_config.get("enabled", True)):
+        lookahead_result = run_lookahead_audit(
+            data,
+            normalized["template"],
+            params,
+            normalized["trade_on_close"],
+            int(lookahead_config.get("truncation_bars", 30)),
+        )
+        lookahead_audit = lookahead_audit_frame(lookahead_result)
+        lookahead_details = lookahead_result.details
+        if lookahead_result.status == "fail":
+            warnings.append("Look-ahead audit failed: positions changed when future rows were truncated.")
 
     class RunJinStrategy(Strategy):
         fast_window = int(params.get("fast_window", 20))
@@ -447,7 +478,7 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
         RunJinStrategy,
         cash=normalized["cash"],
         commission=normalized["commission"],
-        trade_on_close=True,
+        trade_on_close=normalized["trade_on_close"],
         exclusive_orders=True,
         hedging=False,
     )
@@ -469,12 +500,15 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
         assumptions=describe_execution_assumptions(
             normalized["commission_model"],
             normalized["slippage_model"],
+            normalized["trade_on_close"],
             normalized["position_model"],
             normalized["benchmark"],
         ),
         metrics_detail=metrics_detail_frame(metrics_detail),
         ump_verdict=pd.DataFrame({"verdict": [ump_verdict.verdict] * len(ump_verdict.reasons), "reason": ump_verdict.reasons}),
         slippage_detail=slippage_detail,
+        lookahead_audit=lookahead_audit,
+        lookahead_details=lookahead_details,
     )
 
 

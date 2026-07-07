@@ -9,6 +9,7 @@ RunJin's Backtest Lab is designed as a research platform, not an execution engin
 - Assets: US stock OHLCV and crypto OHLCV already loaded by the app
 - Outputs: equity curve, drawdown overlay, statistics, trade log, portfolio rebalance log, and latest weights
 - Safety: no leverage, no real orders, no exchange keys, no arbitrary Python execution
+- Bias control: default next-bar execution plus truncated-data look-ahead audit
 
 ## Borrowed Strengths
 
@@ -76,8 +77,12 @@ stop_loss_pct: 6
 take_profit_pct: 0
 commission_model: us_equity_basic
 slippage_model: hl_mean_gap_guard
+trade_on_close: false
 position_model: atr_risk
 benchmark: SPY
+lookahead_check:
+  enabled: true
+  truncation_bars: 30
 risk_judge:
   enabled: true
   max_volatility: 0.75
@@ -93,10 +98,22 @@ The ABU-inspired layer adds execution assumptions and risk review without turnin
 
 - Cost models: `pct_only`, `us_equity_basic`, `a_share_basic`, `hk_equity_basic`, `crypto_basic`.
 - Slippage models: `close`, `hl_mean`, `hl_mean_gap_guard`.
+- Execution timing: `trade_on_close: false` is the default, so signals based on the current bar execute on the next bar. Set it to `true` only when the strategy can genuinely decide at the period close.
 - Position models: `fixed_fraction`, `atr_risk`, `kelly_lite`.
 - UMP-lite verdicts: `allow`, `review`, `block`.
 
 K-line Lab also includes research-only gap, ATR, rolling-correlation, and similar-path diagnostics.
+
+## Look-Ahead Bias Guard
+
+RunJin now runs a truncated-data audit for single-asset strategy backtests when `lookahead_check.enabled` is true:
+
+1. Generate a position file from the full historical data.
+2. Remove the latest `truncation_bars` rows from the same history.
+3. Generate a second position file from the truncated history.
+4. Compare both position files through their shared dates.
+
+If the shared history positions differ, the strategy likely used future rows indirectly and the audit returns `fail`. This check does not prove a strategy is profitable, but it catches a common class of inflated backtests.
 
 ## Batch Strategy Leaderboard
 
@@ -112,5 +129,5 @@ The vectorbt-inspired batch layer scans many symbols and parameter variants with
 1. Add a job table for long-running parameter sweeps.
 2. Add optional vectorbt acceleration for very large grid searches and portfolio-level signal matrices.
 3. Add walk-forward validation and train/test splits.
-4. Add slippage models, liquidity constraints, and benchmark comparison.
+4. Add liquidity constraints and point-in-time data snapshots.
 5. Add result persistence so every backtest can be reproduced from a saved spec and data snapshot.

@@ -187,6 +187,15 @@ def main():
         backtest_result = run_strategy_backtest(prices.loc[prices["ticker"] == "NVDA"].copy(), "date", DEFAULT_STRATEGY_SPEC)
         assert_true("Return [%]" in backtest_result.stats, "Backtest stats missing return")
         assert_true(backtest_result.assumptions is not None and not backtest_result.assumptions.empty, "Execution assumptions missing")
+        assert_true(
+            not backtest_result.assumptions.loc[
+                (backtest_result.assumptions["setting"] == "trade_on_close")
+                & (backtest_result.assumptions["value"] == "false")
+            ].empty,
+            "Backtest should default to next-bar execution to reduce look-ahead risk",
+        )
+        assert_true(backtest_result.lookahead_audit is not None and not backtest_result.lookahead_audit.empty, "Look-ahead audit missing")
+        assert_true(backtest_result.lookahead_audit["status"].iloc[0] in {"pass", "review", "fail"}, "Invalid look-ahead audit status")
         assert_true(backtest_result.metrics_detail is not None and not backtest_result.metrics_detail.empty, "ABU-style metrics missing")
         assert_true(backtest_result.ump_verdict is not None and not backtest_result.ump_verdict.empty, "UMP-lite verdict missing")
     except BacktestEngineUnavailable:

@@ -1377,6 +1377,15 @@ def page_backtest_lab(prices, crypto):
             named_table("UMP-lite verdict", result.ump_verdict)
         if result.assumptions is not None and not result.assumptions.empty:
             named_table("Execution assumptions", result.assumptions)
+        if result.lookahead_audit is not None and not result.lookahead_audit.empty:
+            audit_status = result.lookahead_audit["status"].iloc[0]
+            st.markdown(
+                f'<div class="runjin-note">Look-ahead audit: <strong>{str(audit_status).upper()}</strong>. The engine reruns the strategy on truncated data and compares the shared position file with the full-data run.</div>',
+                unsafe_allow_html=True,
+            )
+            named_table("Look-ahead bias audit", result.lookahead_audit)
+            if result.lookahead_details is not None and not result.lookahead_details.empty:
+                named_table("Look-ahead audit details", result.lookahead_details)
 
         equity = result.equity_curve.copy()
         date_col = "Date" if "Date" in equity.columns else equity.columns[0]

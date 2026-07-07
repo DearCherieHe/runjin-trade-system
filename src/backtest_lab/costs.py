@@ -47,6 +47,7 @@ def estimate_commission(model_name: str, trade_value: float, side: str = "buy") 
 def describe_execution_assumptions(
     commission_model: str,
     slippage_model: str,
+    trade_on_close: bool,
     position_model: str,
     benchmark: str,
 ) -> pd.DataFrame:
@@ -55,6 +56,11 @@ def describe_execution_assumptions(
         [
             {"setting": "commission_model", "value": commission_model, "description": cost_model.notes},
             {"setting": "slippage_model", "value": slippage_model, "description": SLIPPAGE_MODELS.get(slippage_model, "Unknown slippage model")},
+            {
+                "setting": "trade_on_close",
+                "value": str(bool(trade_on_close)).lower(),
+                "description": "False means signals generated from the current bar are executed on the next bar, reducing look-ahead risk.",
+            },
             {"setting": "position_model", "value": position_model, "description": "No leverage; capped by strategy position_size."},
             {"setting": "benchmark", "value": benchmark or "asset buy & hold", "description": "Used for ABU-style comparison metrics when available."},
         ]
