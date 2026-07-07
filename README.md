@@ -95,9 +95,10 @@ The `Backtest Lab` page uses `backtesting.py` as the execution engine instead of
 
 - input strategy specs as editable YAML, not arbitrary Python code
 - supported templates: `sma_crossover`, `rsi_mean_reversion`, `bollinger_reversion`, `macd_trend`
+- vectorbt-style batch scan: run many symbols and parameter variants, rank candidates in a strategy leaderboard, and inspect top equity curves
 - portfolio templates: `equal_weight_rebalance`, `momentum_top_n`, `inverse_volatility`
 - supported assets: US stock OHLCV and crypto OHLCV from the current data mode
-- outputs: return, max drawdown, Sharpe, win rate, trade count, equity curve, drawdown overlay, statistics table, trade log, rebalance log, and latest weights
+- outputs: return, max drawdown, Sharpe, win rate, trade count, score, equity curve, drawdown overlay, statistics table, strategy leaderboard, trade log, rebalance log, and latest weights
 - V0.1 is research-only: no leverage, no broker orders, no exchange keys, no automatic live trading
 
 ## Boundaries

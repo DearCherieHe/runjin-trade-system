@@ -98,10 +98,19 @@ The ABU-inspired layer adds execution assumptions and risk review without turnin
 
 K-line Lab also includes research-only gap, ATR, rolling-correlation, and similar-path diagnostics.
 
+## Batch Strategy Leaderboard
+
+The vectorbt-inspired batch layer scans many symbols and parameter variants without executing user Python code or placing orders.
+
+- Strategy templates: `sma_crossover`, `rsi_mean_reversion`, `macd_trend`, `bollinger_reversion`.
+- Controls: selected universe, max symbols, selected templates, and max variants per template.
+- Outputs: ranked leaderboard, return, max drawdown, Sharpe, win rate, trade count, score, and top indexed equity curves.
+- Boundary: this is a research scanner. Large full-market runs should move into a persisted job table before being scheduled.
+
 ## Upgrade Path
 
 1. Add a job table for long-running parameter sweeps.
-2. Add vectorbt for large grid searches and portfolio-level signal matrices.
+2. Add optional vectorbt acceleration for very large grid searches and portfolio-level signal matrices.
 3. Add walk-forward validation and train/test splits.
 4. Add slippage models, liquidity constraints, and benchmark comparison.
 5. Add result persistence so every backtest can be reproduced from a saved spec and data snapshot.

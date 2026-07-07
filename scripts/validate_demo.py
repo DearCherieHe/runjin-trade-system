@@ -27,6 +27,7 @@ from src.backtest_lab.engine import (
     run_strategy_backtest,
     validate_strategy_spec,
 )
+from src.backtest_lab.batch import build_parameter_grid, run_batch_backtest
 from src.backtest_lab.costs import estimate_commission, slippage_reference
 from src.backtest_lab.position_sizing import atr_position_size
 from src.backtest_lab.ump_lite import evaluate_ump_lite
@@ -139,6 +140,21 @@ def main():
     portfolio_result = run_portfolio_backtest(prices, DEFAULT_PORTFOLIO_SPEC)
     assert_true("Return [%]" in portfolio_result.stats, "Portfolio backtest stats missing return")
     assert_true(not portfolio_result.rebalance_log.empty, "Portfolio rebalance log is empty")
+    batch_grid = build_parameter_grid(["sma_crossover", "rsi_mean_reversion"], max_variants_per_strategy=2)
+    assert_true(len(batch_grid) == 4, "Batch parameter grid did not respect variant limit")
+    batch_result = run_batch_backtest(
+        prices,
+        tickers=["NVDA", "TSLA", "AMD"],
+        strategies=["sma_crossover", "rsi_mean_reversion"],
+        max_tickers=3,
+        max_variants_per_strategy=2,
+        min_bars=40,
+    )
+    expected_batch_cols = {"ticker", "strategy", "params", "return_pct", "max_drawdown_pct", "sharpe", "win_rate_pct", "trades", "score"}
+    assert_true(not batch_result.leaderboard.empty, "Batch backtest leaderboard is empty")
+    assert_true(expected_batch_cols.issubset(set(batch_result.leaderboard.columns)), "Batch leaderboard missing expected columns")
+    assert_true(batch_result.leaderboard["ticker"].nunique() <= 3, "Batch backtest exceeded max ticker cap")
+    assert_true(not batch_result.equity_curves.empty, "Batch backtest equity curves are empty")
 
     stressed = stock_bt.copy()
     stressed.loc[stressed.index[-1], "equity"] = stressed["equity"].iloc[-2] * 0.90

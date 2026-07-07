@@ -26,6 +26,7 @@ from src.backtest_lab.engine import (
     run_portfolio_backtest,
     run_strategy_backtest,
 )
+from src.backtest_lab.batch import BATCH_STRATEGY_GRIDS, run_batch_backtest
 from src.kline.indicators import add_indicators, classify_regime, relative_strength
 from src.kline.abu_research import atr_research, gap_analysis, rolling_correlation_matrix, similar_paths
 from src.kline.timeframes import apply_asof, coverage_summary, resample_ohlcv
@@ -1276,6 +1277,77 @@ def page_backtest_lab(prices, crypto):
             named_table("Backtest trades", trades[display_cols] if display_cols else trades)
         else:
             st.markdown('<div class="runjin-note">No trades were generated. Adjust the strategy parameters or date range.</div>', unsafe_allow_html=True)
+
+    section_label("Batch Backtest Leaderboard")
+    st.markdown(
+        '<div class="runjin-note">Vectorbt-style batch lab: scan many symbols and parameter variants at once, then rank strategy candidates before deeper single-asset review.</div>',
+        unsafe_allow_html=True,
+    )
+    available_tickers = sorted(prices["ticker"].dropna().astype(str).unique())
+    default_batch_tickers = available_tickers[: min(20, len(available_tickers))]
+    col1, col2, col3 = st.columns([1.4, 0.8, 0.8])
+    batch_tickers = col1.multiselect("Batch universe", available_tickers, default=default_batch_tickers, key="batch_tickers")
+    max_batch_tickers = col2.slider("Max symbols", 5, min(200, max(5, len(available_tickers))), min(30, max(5, len(available_tickers))), 5, key="batch_max_tickers")
+    max_variants = col3.slider("Variants / strategy", 1, 12, 6, 1, key="batch_max_variants")
+    batch_strategies = st.multiselect(
+        "Strategy templates",
+        list(BATCH_STRATEGY_GRIDS.keys()),
+        default=["sma_crossover", "rsi_mean_reversion", "macd_trend"],
+        key="batch_strategies",
+    )
+    if st.button("Run batch leaderboard", type="primary", key="batch_run"):
+        with st.spinner("Running vectorbt-style batch scan..."):
+            try:
+                batch_result = run_batch_backtest(
+                    prices,
+                    tickers=batch_tickers,
+                    strategies=batch_strategies,
+                    max_tickers=max_batch_tickers,
+                    max_variants_per_strategy=max_variants,
+                )
+            except Exception as exc:
+                st.error(f"Batch backtest failed: {exc}")
+                return
+        st.session_state["batch_result"] = batch_result
+
+    batch_result = st.session_state.get("batch_result")
+    if batch_result:
+        for warning in batch_result.warnings[:8]:
+            st.warning(warning)
+        leaderboard = batch_result.leaderboard.copy()
+        if leaderboard.empty:
+            st.markdown('<div class="runjin-note">No batch results were generated. Add more price history or select different templates.</div>', unsafe_allow_html=True)
+        else:
+            top = leaderboard.iloc[0]
+            col1, col2, col3, col4, col5 = st.columns(5)
+            col1.metric("Best ticker", top["ticker"])
+            col2.metric("Best return", fmt_number(top["return_pct"], 1, "%"))
+            col3.metric("Best drawdown", fmt_number(top["max_drawdown_pct"], 1, "%"))
+            col4.metric("Best Sharpe", fmt_number(top["sharpe"], 2))
+            col5.metric("Runs", fmt_int(len(leaderboard)))
+            display = leaderboard.head(80).copy()
+            for col in ["return_pct", "max_drawdown_pct", "sharpe", "win_rate_pct", "score"]:
+                display[col] = pd.to_numeric(display[col], errors="coerce").round(2)
+            named_table("Strategy leaderboard", display)
+
+            curves = batch_result.equity_curves
+            if not curves.empty:
+                top_keys = leaderboard.head(5)[["ticker", "strategy", "params"]]
+                fig = go.Figure()
+                for _, row in top_keys.iterrows():
+                    mask = (
+                        (curves["ticker"] == row["ticker"])
+                        & (curves["strategy"] == row["strategy"])
+                        & (curves["params"] == row["params"])
+                    )
+                    curve = curves.loc[mask].copy()
+                    if curve.empty:
+                        continue
+                    normalized = curve["equity"] / curve["equity"].iloc[0] * 100
+                    fig.add_trace(go.Scatter(x=curve["date"], y=normalized, name=f"{row['ticker']} {row['strategy']}"))
+                fig.update_layout(title="Top batch equity curves", yaxis_title="Indexed equity")
+                style_figure(fig, 410, time_axis=True)
+                st.plotly_chart(fig, use_container_width=True)
 
     section_label("Portfolio Backtest")
     st.markdown(
