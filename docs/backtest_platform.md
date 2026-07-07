@@ -9,7 +9,7 @@ RunJin's Backtest Lab is designed as a research platform, not an execution engin
 - Assets: US stock OHLCV and crypto OHLCV already loaded by the app
 - Outputs: equity curve, drawdown overlay, statistics, trade log, portfolio rebalance log, and latest weights
 - Safety: no leverage, no real orders, no exchange keys, no arbitrary Python execution
-- Bias control: default next-bar execution plus truncated-data look-ahead audit
+- Bias control: default next-bar execution, truncated-data look-ahead audit, and data-snooping audit
 
 ## Borrowed Strengths
 
@@ -83,6 +83,11 @@ benchmark: SPY
 lookahead_check:
   enabled: true
   truncation_bars: 30
+snooping_check:
+  enabled: true
+  max_parameters: 5
+  min_bars_per_parameter: 30
+  assumed_trials: 1
 risk_judge:
   enabled: true
   max_volatility: 0.75
@@ -114,6 +119,20 @@ RunJin now runs a truncated-data audit for single-asset strategy backtests when 
 4. Compare both position files through their shared dates.
 
 If the shared history positions differ, the strategy likely used future rows indirectly and the audit returns `fail`. This check does not prove a strategy is profitable, but it catches a common class of inflated backtests.
+
+## Data-Snooping Bias Guard
+
+RunJin adds a second audit for overfitting risk:
+
+- `adjustable_parameter_count`: counts strategy parameters plus explicit sizing/exit knobs. The default rule of thumb is no more than five.
+- `bars_per_parameter`: warns when there is too little history for the number of knobs.
+- `assumed_trials`: asks you to count repeated manual tweaks, batch scans, and qualitative design choices as trials.
+- `qualitative_choice_count`: flags choices such as template, execution timing, cost model, slippage model, and position model.
+- `deflated_sharpe_proxy`: applies a simple Sharpe haircut based on assumed trial count. It is an explainable proxy, not the exact Bailey Deflated Sharpe Ratio.
+- `sample_size_true_sharpe_ge_0`: applies practical Bailey-style thresholds: Sharpe >= 1 needs at least 681 data points, while Sharpe >= 2 needs at least 174 data points, to support confidence that true Sharpe is at least 0.
+- `sample_size_true_sharpe_ge_1`: requires Sharpe >= 1.5 and at least 2,739 data points to support confidence that true Sharpe is at least 1.
+
+The audit is intentionally conservative. A `review` result does not mean a strategy is invalid; it means the backtest performance should be discounted before you trust it.
 
 ## Batch Strategy Leaderboard
 

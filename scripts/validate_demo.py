@@ -196,6 +196,21 @@ def main():
         )
         assert_true(backtest_result.lookahead_audit is not None and not backtest_result.lookahead_audit.empty, "Look-ahead audit missing")
         assert_true(backtest_result.lookahead_audit["status"].iloc[0] in {"pass", "review", "fail"}, "Invalid look-ahead audit status")
+        assert_true(backtest_result.snooping_audit is not None and not backtest_result.snooping_audit.empty, "Data-snooping audit missing")
+        assert_true(
+            {
+                "adjustable_parameter_count",
+                "bars_per_parameter",
+                "assumed_trials",
+                "qualitative_choice_count",
+                "deflated_sharpe_proxy",
+                "sample_size_true_sharpe_ge_0",
+                "sample_size_true_sharpe_ge_1",
+            }.issubset(
+                set(backtest_result.snooping_audit["check"])
+            ),
+            "Data-snooping audit missing required checks",
+        )
         assert_true(backtest_result.metrics_detail is not None and not backtest_result.metrics_detail.empty, "ABU-style metrics missing")
         assert_true(backtest_result.ump_verdict is not None and not backtest_result.ump_verdict.empty, "UMP-lite verdict missing")
     except BacktestEngineUnavailable:

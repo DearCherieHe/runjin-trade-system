@@ -1386,6 +1386,13 @@ def page_backtest_lab(prices, crypto):
             named_table("Look-ahead bias audit", result.lookahead_audit)
             if result.lookahead_details is not None and not result.lookahead_details.empty:
                 named_table("Look-ahead audit details", result.lookahead_details)
+        if result.snooping_audit is not None and not result.snooping_audit.empty:
+            worst_status = "FAIL" if result.snooping_audit["status"].eq("fail").any() else "REVIEW" if result.snooping_audit["status"].eq("review").any() else "PASS"
+            st.markdown(
+                f'<div class="runjin-note">Data-snooping audit: <strong>{worst_status}</strong>. This checks parameter count, sample-per-parameter, assumed trial count, qualitative choices, a conservative Sharpe haircut proxy, and Bailey-style sample-size thresholds.</div>',
+                unsafe_allow_html=True,
+            )
+            named_table("Data-snooping bias audit", result.snooping_audit)
 
         equity = result.equity_curve.copy()
         date_col = "Date" if "Date" in equity.columns else equity.columns[0]

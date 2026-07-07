@@ -10,6 +10,7 @@ from src.backtest_lab.costs import describe_execution_assumptions, resolve_commi
 from src.backtest_lab.bias import lookahead_audit_frame, run_lookahead_audit
 from src.backtest_lab.metrics import abu_style_metrics, metrics_detail_frame
 from src.backtest_lab.position_sizing import resolve_position_size
+from src.backtest_lab.snooping import data_snooping_audit_frame
 from src.backtest_lab.ump_lite import evaluate_ump_lite
 
 
@@ -28,6 +29,11 @@ take_profit_pct: 0
 lookahead_check:
   enabled: true
   truncation_bars: 30
+snooping_check:
+  enabled: true
+  max_parameters: 5
+  min_bars_per_parameter: 30
+  assumed_trials: 1
 risk_judge:
   enabled: true
   max_volatility: 0.75
@@ -189,6 +195,7 @@ class BacktestResult:
     slippage_detail: pd.DataFrame | None = None
     lookahead_audit: pd.DataFrame | None = None
     lookahead_details: pd.DataFrame | None = None
+    snooping_audit: pd.DataFrame | None = None
 
 
 @dataclass
@@ -357,6 +364,9 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
     lookahead_check = spec.get("lookahead_check", {"enabled": True, "truncation_bars": 30}) or {}
     if not isinstance(lookahead_check, dict):
         raise ValueError("lookahead_check must be a YAML object.")
+    snooping_check = spec.get("snooping_check", {"enabled": True, "max_parameters": 5, "min_bars_per_parameter": 30, "assumed_trials": 1}) or {}
+    if not isinstance(snooping_check, dict):
+        raise ValueError("snooping_check must be a YAML object.")
     position_parameters = spec.get("position_parameters", {}) or {}
     if not isinstance(position_parameters, dict):
         raise ValueError("position_parameters must be a YAML object.")
@@ -381,6 +391,7 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
         "take_profit_pct": take_profit_pct / 100,
         "risk_judge": risk_judge,
         "lookahead_check": lookahead_check,
+        "snooping_check": snooping_check,
         "parameters": params,
     }
     return normalized, warnings
@@ -486,6 +497,9 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
     equity_curve = stats["_equity_curve"].reset_index()
     trades = stats["_trades"].copy()
     summary = _stats_to_dict(stats)
+    snooping_audit = data_snooping_audit_frame(normalized, summary, len(data)) if bool(normalized["snooping_check"].get("enabled", True)) else pd.DataFrame()
+    if not snooping_audit.empty and snooping_audit["status"].isin(["review", "fail"]).any():
+        warnings.append("Data-snooping audit found review/fail items. Treat optimized performance with a haircut.")
     metrics_detail = abu_style_metrics(equity_curve, trades, data.reset_index())
     summary.update({f"ABU {key}": value for key, value in metrics_detail.items() if value is not None})
     ump_verdict = evaluate_ump_lite(raw_data, equity_curve, trades, normalized["risk_judge"])
@@ -509,6 +523,7 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
         slippage_detail=slippage_detail,
         lookahead_audit=lookahead_audit,
         lookahead_details=lookahead_details,
+        snooping_audit=snooping_audit,
     )
 
 
