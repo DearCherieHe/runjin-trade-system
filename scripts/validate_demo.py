@@ -185,6 +185,8 @@ def main():
     journal_sections = default_deep_dive_sections("NVDA", scored.loc[scored["ticker"] == "NVDA"].iloc[0].to_dict())
     note = build_markdown_note("NVDA", pd.DataFrame(journal_sections))
     assert_true("NVDA Deep Dive" in note and "Business identity" in note, "Trade Skills journal note generation failed")
+    series_journal_sections = default_deep_dive_sections("NVDA", scored.loc[scored["ticker"] == "NVDA"].iloc[0])
+    assert_true(series_journal_sections[0]["current_note"], "Trade Skills journal should accept pandas Series profiles")
 
     report = build_weekly_report(
         scored,
