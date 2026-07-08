@@ -6,11 +6,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.backtest_lab.costs import describe_execution_assumptions, resolve_commission_rate, slippage_reference
+from src.backtest_lab.costs import describe_execution_assumptions, resolve_commission_rate, slippage_reference, transaction_cost_audit_frame
 from src.backtest_lab.bias import lookahead_audit_frame, run_lookahead_audit
 from src.backtest_lab.metrics import abu_style_metrics, drawdown_tolerance_frame, metrics_detail_frame
 from src.backtest_lab.position_sizing import resolve_position_size
+from src.backtest_lab.regime import recent_regime_audit_frame
 from src.backtest_lab.snooping import data_snooping_audit_frame, out_of_sample_audit_frame
+from src.backtest_lab.survivorship import survivorship_audit_frame
 from src.backtest_lab.ump_lite import evaluate_ump_lite
 
 
@@ -43,6 +45,34 @@ drawdown_tolerance:
   max_drawdown_pct: 10
   max_drawdown_duration_days: 90
   max_drawdown_duration_bars: 63
+transaction_cost_check:
+  enabled: true
+  half_spread_bps: 5
+  market_impact_bps: 0
+  latency_slippage_bps: 1
+  max_per_side_cost_bps: 20
+  max_annual_cost_drag_pct: 6
+  min_avg_trade_edge_multiple: 2
+survivorship_check:
+  enabled: true
+  data_universe: current_listed_symbols
+  includes_delisted: false
+  includes_bankrupt: false
+  includes_acquired: false
+  point_in_time_membership: false
+  low_price_bias: false
+  low_valuation_bias: false
+  distress_bias: false
+  low_price_threshold: 5
+regime_check:
+  enabled: true
+  recent_years: 3
+  min_recent_bars: 174
+  max_history_years_for_equal_weight: 5
+  max_recent_sharpe_decay: 0.75
+  min_recent_sharpe: 0
+  current_costs_applied_to_full_history: true
+  known_regime_breaks: ""
 risk_judge:
   enabled: true
   max_volatility: 0.75
@@ -207,6 +237,9 @@ class BacktestResult:
     snooping_audit: pd.DataFrame | None = None
     out_of_sample_audit: pd.DataFrame | None = None
     drawdown_tolerance: pd.DataFrame | None = None
+    transaction_cost_audit: pd.DataFrame | None = None
+    survivorship_audit: pd.DataFrame | None = None
+    regime_audit: pd.DataFrame | None = None
 
 
 @dataclass
@@ -384,6 +417,41 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
     drawdown_tolerance = spec.get("drawdown_tolerance", {"max_drawdown_pct": 10, "max_drawdown_duration_days": 90, "max_drawdown_duration_bars": 63}) or {}
     if not isinstance(drawdown_tolerance, dict):
         raise ValueError("drawdown_tolerance must be a YAML object.")
+    transaction_cost_check = spec.get("transaction_cost_check", {"enabled": True, "half_spread_bps": 5, "market_impact_bps": 0, "latency_slippage_bps": 1, "max_per_side_cost_bps": 20, "max_annual_cost_drag_pct": 6, "min_avg_trade_edge_multiple": 2}) or {}
+    if not isinstance(transaction_cost_check, dict):
+        raise ValueError("transaction_cost_check must be a YAML object.")
+    survivorship_check = spec.get(
+        "survivorship_check",
+        {
+            "enabled": True,
+            "data_universe": "current_listed_symbols",
+            "includes_delisted": False,
+            "includes_bankrupt": False,
+            "includes_acquired": False,
+            "point_in_time_membership": False,
+            "low_price_bias": False,
+            "low_valuation_bias": False,
+            "distress_bias": False,
+            "low_price_threshold": 5,
+        },
+    ) or {}
+    if not isinstance(survivorship_check, dict):
+        raise ValueError("survivorship_check must be a YAML object.")
+    regime_check = spec.get(
+        "regime_check",
+        {
+            "enabled": True,
+            "recent_years": 3,
+            "min_recent_bars": 174,
+            "max_history_years_for_equal_weight": 5,
+            "max_recent_sharpe_decay": 0.75,
+            "min_recent_sharpe": 0,
+            "current_costs_applied_to_full_history": True,
+            "known_regime_breaks": "",
+        },
+    ) or {}
+    if not isinstance(regime_check, dict):
+        raise ValueError("regime_check must be a YAML object.")
     position_parameters = spec.get("position_parameters", {}) or {}
     if not isinstance(position_parameters, dict):
         raise ValueError("position_parameters must be a YAML object.")
@@ -411,6 +479,9 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
         "snooping_check": snooping_check,
         "out_of_sample_check": out_of_sample_check,
         "drawdown_tolerance": drawdown_tolerance,
+        "transaction_cost_check": transaction_cost_check,
+        "survivorship_check": survivorship_check,
+        "regime_check": regime_check,
         "parameters": params,
     }
     return normalized, warnings
@@ -527,6 +598,15 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
     if not drawdown_tolerance.empty and drawdown_tolerance["status"].isin(["review", "fail"]).any():
         warnings.append("Drawdown tolerance guard found review/fail items. Compare the strategy pain profile with your real stopping threshold.")
     summary.update({f"ABU {key}": value for key, value in metrics_detail.items() if value is not None})
+    transaction_cost_audit = transaction_cost_audit_frame(normalized, summary, metrics_detail, trades) if bool(normalized["transaction_cost_check"].get("enabled", True)) else pd.DataFrame()
+    if not transaction_cost_audit.empty and transaction_cost_audit["status"].isin(["review", "fail"]).any():
+        warnings.append("Transaction cost guard found review/fail items. Check whether costs erase the strategy edge.")
+    survivorship_audit = survivorship_audit_frame(raw_data, normalized) if bool(normalized["survivorship_check"].get("enabled", True)) else pd.DataFrame()
+    if not survivorship_audit.empty and survivorship_audit["status"].isin(["review", "fail"]).any():
+        warnings.append("Survivorship bias guard found review/fail items. Current-listed-only data can overstate historical performance.")
+    regime_audit = recent_regime_audit_frame(data.reset_index(), equity_curve, trades, normalized, summary) if bool(normalized["regime_check"].get("enabled", True)) else pd.DataFrame()
+    if not regime_audit.empty and regime_audit["status"].isin(["review", "fail"]).any():
+        warnings.append("Recent regime guard found review/fail items. Weight recent performance more heavily than full-period headline results.")
     ump_verdict = evaluate_ump_lite(raw_data, equity_curve, trades, normalized["risk_judge"])
     return BacktestResult(
         name=normalized["name"],
@@ -551,6 +631,9 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
         snooping_audit=snooping_audit,
         out_of_sample_audit=oos_audit,
         drawdown_tolerance=drawdown_tolerance,
+        transaction_cost_audit=transaction_cost_audit,
+        survivorship_audit=survivorship_audit,
+        regime_audit=regime_audit,
     )
 
 

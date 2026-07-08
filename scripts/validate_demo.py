@@ -241,6 +241,41 @@ def main():
             ),
             "Drawdown tolerance guard missing required checks",
         )
+        assert_true(backtest_result.transaction_cost_audit is not None and not backtest_result.transaction_cost_audit.empty, "Transaction cost guard missing")
+        assert_true(
+            {
+                "per_side_transaction_cost",
+                "round_trip_transaction_cost",
+                "annual_cost_drag",
+                "average_trade_edge_vs_cost",
+                "cost_adjusted_return_proxy",
+                "cost_adjusted_sharpe_proxy",
+            }.issubset(set(backtest_result.transaction_cost_audit["check"])),
+            "Transaction cost guard missing required checks",
+        )
+        assert_true(backtest_result.survivorship_audit is not None and not backtest_result.survivorship_audit.empty, "Survivorship bias guard missing")
+        assert_true(
+            {
+                "data_universe_declared",
+                "includes_delisted_bankrupt_acquired",
+                "point_in_time_membership",
+                "strategy_survivorship_vulnerability",
+            }.issubset(set(backtest_result.survivorship_audit["check"])),
+            "Survivorship bias guard missing required checks",
+        )
+        assert_true(backtest_result.regime_audit is not None and not backtest_result.regime_audit.empty, "Recent regime guard missing")
+        assert_true(
+            {
+                "backtest_history_span",
+                "recent_regime_window",
+                "recent_vs_full_performance",
+                "early_performance_inflation",
+                "historical_cost_stationarity",
+                "regime_change_disclosure",
+                "nonstationarity_warning",
+            }.issubset(set(backtest_result.regime_audit["check"])),
+            "Recent regime guard missing required checks",
+        )
         assert_true(backtest_result.ump_verdict is not None and not backtest_result.ump_verdict.empty, "UMP-lite verdict missing")
     except BacktestEngineUnavailable:
         pass

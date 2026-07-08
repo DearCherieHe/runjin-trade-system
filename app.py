@@ -1424,6 +1424,27 @@ def page_backtest_lab(prices, crypto):
             named_table("UMP-lite verdict", result.ump_verdict)
         if result.assumptions is not None and not result.assumptions.empty:
             named_table("Execution assumptions", result.assumptions)
+        if result.transaction_cost_audit is not None and not result.transaction_cost_audit.empty:
+            worst_status = "FAIL" if result.transaction_cost_audit["status"].eq("fail").any() else "REVIEW" if result.transaction_cost_audit["status"].eq("review").any() else "PASS"
+            st.markdown(
+                f'<div class="runjin-note">Transaction cost guard: <strong>{worst_status}</strong>. This estimates commission, half-spread, market impact, and latency slippage in bps, then checks whether costs erase the strategy edge.</div>',
+                unsafe_allow_html=True,
+            )
+            named_table("Transaction cost guard", result.transaction_cost_audit)
+        if result.survivorship_audit is not None and not result.survivorship_audit.empty:
+            worst_status = "FAIL" if result.survivorship_audit["status"].eq("fail").any() else "REVIEW" if result.survivorship_audit["status"].eq("review").any() else "PASS"
+            st.markdown(
+                f'<div class="runjin-note">Survivorship bias guard: <strong>{worst_status}</strong>. This checks whether the historical universe includes delisted, bankrupt, acquired, and point-in-time membership data; current-listed-only data can overstate returns.</div>',
+                unsafe_allow_html=True,
+            )
+            named_table("Survivorship bias guard", result.survivorship_audit)
+        if result.regime_audit is not None and not result.regime_audit.empty:
+            worst_status = "FAIL" if result.regime_audit["status"].eq("fail").any() else "REVIEW" if result.regime_audit["status"].eq("review").any() else "PASS"
+            st.markdown(
+                f'<div class="runjin-note">Recent regime guard: <strong>{worst_status}</strong>. This compares recent performance with full-period and early-period results, then flags cost-stationarity, survivor-set, and market-structure risks in old history.</div>',
+                unsafe_allow_html=True,
+            )
+            named_table("Recent regime guard", result.regime_audit)
         if result.lookahead_audit is not None and not result.lookahead_audit.empty:
             audit_status = result.lookahead_audit["status"].iloc[0]
             st.markdown(
