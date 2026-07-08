@@ -8,7 +8,7 @@ import pandas as pd
 
 from src.backtest_lab.costs import describe_execution_assumptions, resolve_commission_rate, slippage_reference
 from src.backtest_lab.bias import lookahead_audit_frame, run_lookahead_audit
-from src.backtest_lab.metrics import abu_style_metrics, metrics_detail_frame
+from src.backtest_lab.metrics import abu_style_metrics, drawdown_tolerance_frame, metrics_detail_frame
 from src.backtest_lab.position_sizing import resolve_position_size
 from src.backtest_lab.snooping import data_snooping_audit_frame, out_of_sample_audit_frame
 from src.backtest_lab.ump_lite import evaluate_ump_lite
@@ -39,6 +39,10 @@ out_of_sample_check:
   train_pct: 0.70
   min_test_bars: 174
   max_sharpe_decay: 0.75
+drawdown_tolerance:
+  max_drawdown_pct: 10
+  max_drawdown_duration_days: 90
+  max_drawdown_duration_bars: 63
 risk_judge:
   enabled: true
   max_volatility: 0.75
@@ -202,6 +206,7 @@ class BacktestResult:
     lookahead_details: pd.DataFrame | None = None
     snooping_audit: pd.DataFrame | None = None
     out_of_sample_audit: pd.DataFrame | None = None
+    drawdown_tolerance: pd.DataFrame | None = None
 
 
 @dataclass
@@ -376,6 +381,9 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
     out_of_sample_check = spec.get("out_of_sample_check", {"enabled": True, "train_pct": 0.70, "min_test_bars": 174, "max_sharpe_decay": 0.75}) or {}
     if not isinstance(out_of_sample_check, dict):
         raise ValueError("out_of_sample_check must be a YAML object.")
+    drawdown_tolerance = spec.get("drawdown_tolerance", {"max_drawdown_pct": 10, "max_drawdown_duration_days": 90, "max_drawdown_duration_bars": 63}) or {}
+    if not isinstance(drawdown_tolerance, dict):
+        raise ValueError("drawdown_tolerance must be a YAML object.")
     position_parameters = spec.get("position_parameters", {}) or {}
     if not isinstance(position_parameters, dict):
         raise ValueError("position_parameters must be a YAML object.")
@@ -402,6 +410,7 @@ def validate_strategy_spec(spec: dict[str, Any], bars: int) -> tuple[dict[str, A
         "lookahead_check": lookahead_check,
         "snooping_check": snooping_check,
         "out_of_sample_check": out_of_sample_check,
+        "drawdown_tolerance": drawdown_tolerance,
         "parameters": params,
     }
     return normalized, warnings
@@ -514,6 +523,9 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
     if not oos_audit.empty and oos_audit["status"].isin(["review", "fail"]).any():
         warnings.append("Out-of-sample audit found review/fail items. Check whether test-period performance is robust.")
     metrics_detail = abu_style_metrics(equity_curve, trades, data.reset_index())
+    drawdown_tolerance = drawdown_tolerance_frame(metrics_detail, normalized)
+    if not drawdown_tolerance.empty and drawdown_tolerance["status"].isin(["review", "fail"]).any():
+        warnings.append("Drawdown tolerance guard found review/fail items. Compare the strategy pain profile with your real stopping threshold.")
     summary.update({f"ABU {key}": value for key, value in metrics_detail.items() if value is not None})
     ump_verdict = evaluate_ump_lite(raw_data, equity_curve, trades, normalized["risk_judge"])
     return BacktestResult(
@@ -538,6 +550,7 @@ def run_strategy_backtest(raw_data: pd.DataFrame, time_col: str, raw_spec: str) 
         lookahead_details=lookahead_details,
         snooping_audit=snooping_audit,
         out_of_sample_audit=oos_audit,
+        drawdown_tolerance=drawdown_tolerance,
     )
 
 
@@ -709,6 +722,12 @@ def _portfolio_stats(equity_curve: pd.DataFrame, prices: pd.DataFrame, starting_
     max_drawdown = equity_curve["DrawdownPct"].min()
     benchmark = prices.mean(axis=1)
     benchmark_return = benchmark.iloc[-1] / benchmark.iloc[0] - 1 if len(benchmark) > 1 else 0
+    benchmark_daily = benchmark.pct_change().reindex(equity_curve["date"]).dropna()
+    aligned = pd.concat([daily_returns.reset_index(drop=True), benchmark_daily.reset_index(drop=True)], axis=1).dropna()
+    information_ratio = None
+    if aligned.shape[0] > 3:
+        active = aligned.iloc[:, 0] - aligned.iloc[:, 1]
+        information_ratio = active.mean() / active.std() * np.sqrt(252) if active.std() > 0 else None
     return {
         "Start": equity_curve["date"].iloc[0],
         "End": equity_curve["date"].iloc[-1],
@@ -718,6 +737,7 @@ def _portfolio_stats(equity_curve: pd.DataFrame, prices: pd.DataFrame, starting_
         "Return (Ann.) [%]": float(annualized_return * 100),
         "Volatility (Ann.) [%]": float(annualized_vol * 100),
         "Sharpe Ratio": float(sharpe) if pd.notna(sharpe) else None,
+        "Information Ratio": float(information_ratio) if information_ratio is not None and pd.notna(information_ratio) else None,
         "Max. Drawdown [%]": float(max_drawdown * 100),
         "Rebalances": int((equity_curve["Turnover"] > 0).sum()),
         "Total Cost [$]": float(equity_curve["Cost"].sum()),

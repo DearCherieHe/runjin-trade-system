@@ -1401,12 +1401,19 @@ def page_backtest_lab(prices, crypto):
             st.warning(warning)
 
         stats = result.stats
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
         col1.metric("Return", fmt_number(stats.get("Return [%]"), 1, "%"))
         col2.metric("Max drawdown", fmt_number(stats.get("Max. Drawdown [%]"), 1, "%"))
         col3.metric("Sharpe", fmt_number(stats.get("Sharpe Ratio"), 2))
-        col4.metric("Win rate", fmt_number(stats.get("Win Rate [%]"), 1, "%"))
-        col5.metric("Trades", fmt_int(stats.get("# Trades", 0) or 0))
+        col4.metric("Info ratio", fmt_number(stats.get("ABU information_ratio"), 2))
+        col5.metric("Trades / year", fmt_number(stats.get("ABU trades_per_year"), 1))
+        col6.metric("DD duration", f"{fmt_int(stats.get('ABU max_drawdown_duration_days', 0) or 0)}d")
+        col7.metric("Trades", fmt_int(stats.get("# Trades", 0) or 0))
+        if (stats.get("ABU trades_per_year") is not None and stats.get("ABU trades_per_year") < 4) or (stats.get("ABU max_drawdown_duration_days") is not None and stats.get("ABU max_drawdown_duration_days") > 120):
+            st.markdown(
+                '<div class="runjin-note">Performance quality warning: low trading frequency or long drawdown duration can make a strategy unsuitable as the main cash-flow engine even when total return looks acceptable.</div>',
+                unsafe_allow_html=True,
+            )
 
         if result.ump_verdict is not None and not result.ump_verdict.empty:
             verdict = result.ump_verdict["verdict"].iloc[0]
@@ -1426,6 +1433,13 @@ def page_backtest_lab(prices, crypto):
             named_table("Look-ahead bias audit", result.lookahead_audit)
             if result.lookahead_details is not None and not result.lookahead_details.empty:
                 named_table("Look-ahead audit details", result.lookahead_details)
+        if result.drawdown_tolerance is not None and not result.drawdown_tolerance.empty:
+            worst_status = "FAIL" if result.drawdown_tolerance["status"].eq("fail").any() else "REVIEW" if result.drawdown_tolerance["status"].eq("review").any() else "PASS"
+            st.markdown(
+                f'<div class="runjin-note">Drawdown tolerance guard: <strong>{worst_status}</strong>. This compares maximum drawdown depth and longest time underwater with your stated tolerance.</div>',
+                unsafe_allow_html=True,
+            )
+            named_table("Drawdown tolerance guard", result.drawdown_tolerance)
         if result.snooping_audit is not None and not result.snooping_audit.empty:
             worst_status = "FAIL" if result.snooping_audit["status"].eq("fail").any() else "REVIEW" if result.snooping_audit["status"].eq("review").any() else "PASS"
             st.markdown(
@@ -1577,12 +1591,13 @@ def page_backtest_lab(prices, crypto):
         for warning in portfolio_result.warnings:
             st.warning(warning)
         stats = portfolio_result.stats
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Return", fmt_number(stats.get("Return [%]"), 1, "%"))
         col2.metric("Max drawdown", fmt_number(stats.get("Max. Drawdown [%]"), 1, "%"))
         col3.metric("Sharpe", fmt_number(stats.get("Sharpe Ratio"), 2))
-        col4.metric("Rebalances", fmt_int(stats.get("Rebalances", 0) or 0))
-        col5.metric("Total cost", f"${fmt_int(stats.get('Total Cost [$]', 0) or 0)}")
+        col4.metric("Info ratio", fmt_number(stats.get("Information Ratio"), 2))
+        col5.metric("Rebalances", fmt_int(stats.get("Rebalances", 0) or 0))
+        col6.metric("Total cost", f"${fmt_int(stats.get('Total Cost [$]', 0) or 0)}")
 
         equity = portfolio_result.equity_curve.copy()
         fig = go.Figure()

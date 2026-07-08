@@ -220,11 +220,33 @@ def main():
             "Out-of-sample audit missing required checks",
         )
         assert_true(backtest_result.metrics_detail is not None and not backtest_result.metrics_detail.empty, "ABU-style metrics missing")
+        metric_names = set(backtest_result.metrics_detail["metric"])
+        assert_true(
+            {
+                "information_ratio",
+                "trades_per_year",
+                "max_drawdown_duration_days",
+                "max_drawdown_duration_bars",
+                "max_drawdown_start",
+                "max_drawdown_trough",
+                "max_drawdown_duration_start",
+                "max_drawdown_duration_end",
+            }.issubset(metric_names),
+            "Risk-adjusted metrics missing information ratio, trade frequency, or drawdown duration",
+        )
+        assert_true(backtest_result.drawdown_tolerance is not None and not backtest_result.drawdown_tolerance.empty, "Drawdown tolerance guard missing")
+        assert_true(
+            {"max_drawdown_depth_tolerance", "max_drawdown_duration_days_tolerance", "max_drawdown_duration_bars_tolerance"}.issubset(
+                set(backtest_result.drawdown_tolerance["check"])
+            ),
+            "Drawdown tolerance guard missing required checks",
+        )
         assert_true(backtest_result.ump_verdict is not None and not backtest_result.ump_verdict.empty, "UMP-lite verdict missing")
     except BacktestEngineUnavailable:
         pass
     portfolio_result = run_portfolio_backtest(prices, DEFAULT_PORTFOLIO_SPEC)
     assert_true("Return [%]" in portfolio_result.stats, "Portfolio backtest stats missing return")
+    assert_true("Information Ratio" in portfolio_result.stats, "Portfolio backtest missing information ratio")
     assert_true(not portfolio_result.rebalance_log.empty, "Portfolio rebalance log is empty")
     batch_grid = build_parameter_grid(["sma_crossover", "rsi_mean_reversion"], max_variants_per_strategy=2)
     assert_true(len(batch_grid) == 4, "Batch parameter grid did not respect variant limit")

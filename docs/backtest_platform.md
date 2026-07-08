@@ -8,6 +8,7 @@ RunJin's Backtest Lab is designed as a research platform, not an execution engin
 - Input: constrained YAML strategy specs
 - Assets: US stock OHLCV and crypto OHLCV already loaded by the app
 - Outputs: equity curve, drawdown overlay, statistics, trade log, portfolio rebalance log, and latest weights
+- Primary performance lens: Information Ratio, Sharpe Ratio, drawdown depth, drawdown duration, and trade frequency; simple return is not enough.
 - Safety: no leverage, no real orders, no exchange keys, no arbitrary Python execution
 - Bias control: default next-bar execution, truncated-data look-ahead audit, data-snooping audit, and out-of-sample audit
 
@@ -93,6 +94,10 @@ out_of_sample_check:
   train_pct: 0.70
   min_test_bars: 174
   max_sharpe_decay: 0.75
+drawdown_tolerance:
+  max_drawdown_pct: 10
+  max_drawdown_duration_days: 90
+  max_drawdown_duration_bars: 63
 risk_judge:
   enabled: true
   max_volatility: 0.75
@@ -106,6 +111,8 @@ parameters:
 
 The ABU-inspired layer adds execution assumptions and risk review without turning the app into a live trading engine:
 
+- Performance quality: Information Ratio, Sharpe, annualized return/volatility, max drawdown, max drawdown duration, and trades per year.
+- Drawdown tolerance: compare peak-to-trough loss and longest underwater period against your stated threshold.
 - Cost models: `pct_only`, `us_equity_basic`, `a_share_basic`, `hk_equity_basic`, `crypto_basic`.
 - Slippage models: `close`, `hl_mean`, `hl_mean_gap_guard`.
 - Execution timing: `trade_on_close: false` is the default, so signals based on the current bar execute on the next bar. Set it to `true` only when the strategy can genuinely decide at the period close.
@@ -150,6 +157,16 @@ RunJin also reserves the most recent part of the history as an out-of-sample seg
 - `oos_sample_size_true_sharpe_ge_0`: applies the same practical sample-size logic to the test set.
 
 This is not full moving optimization yet. It is the first necessary guard: the final parameter set must remain reasonable on a recent period that was not supposed to guide model design.
+
+## Drawdown Tolerance Guard
+
+RunJin treats drawdown as a survivability constraint, not just a chart statistic:
+
+- `max_drawdown_depth_tolerance`: compares the deepest peak-to-trough equity loss with `drawdown_tolerance.max_drawdown_pct`.
+- `max_drawdown_duration_days_tolerance`: compares the longest calendar time spent underwater with `drawdown_tolerance.max_drawdown_duration_days`.
+- `max_drawdown_duration_bars_tolerance`: compares the longest bar-based underwater duration with `drawdown_tolerance.max_drawdown_duration_bars`.
+
+Maximum drawdown depth and maximum drawdown duration often occur in different periods. The guard reports both so you can ask the practical question: would you still be able to keep trading this strategy without being forced to stop?
 
 ## Batch Strategy Leaderboard
 
