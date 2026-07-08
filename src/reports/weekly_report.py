@@ -2,7 +2,7 @@ def format_pct(value):
     return f"{value * 100:.0f}%"
 
 
-def build_weekly_report(scored_watchlist, bot_summaries):
+def build_weekly_report(scored_watchlist, bot_summaries, volume_price_note=None):
     top = scored_watchlist.head(5)
     lines = [
         "# Weekly Trade Lab Review",
@@ -25,6 +25,14 @@ def build_weekly_report(scored_watchlist, bot_summaries):
             f"- {name}: {recommendation}; return {format_pct(summary['metrics']['total_return'])}, "
             f"max drawdown {format_pct(summary['metrics']['max_drawdown'])}, "
             f"trades {summary['metrics']['trade_count']}, status {summary['status']}."
+        )
+    if volume_price_note:
+        lines.extend(
+            [
+                "",
+                "## Volume-price note",
+                f"- {volume_price_note}",
+            ]
         )
     lines.extend(
         [

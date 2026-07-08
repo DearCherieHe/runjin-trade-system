@@ -47,6 +47,7 @@ from src.backtest_lab.position_sizing import atr_position_size
 from src.backtest_lab.ump_lite import evaluate_ump_lite
 from src.kline.abu_research import atr_research, gap_analysis, rolling_correlation_matrix, similar_paths
 from src.kline.indicators import add_indicators
+from src.kline.volume_price import analyze_volume_price_state, latest_volume_price_note
 from src.long_term.scoring import SCORE_COLUMNS, build_score_table
 from src.quant_bot.paper_trader import run_crypto_paper, run_us_stock_paper
 from src.quant_bot.risk import evaluate_risk
@@ -257,6 +258,11 @@ def main():
     assert_true(not atr_view.empty and atr_view["atr_pct"].notna().sum() > 0, "ATR research returned empty data")
     assert_true(not corr.empty, "Rolling correlation matrix returned empty data")
     assert_true(not similar.empty, "Similar path research returned empty data")
+    volume_price = analyze_volume_price_state(nvda_indicators, prices.loc[prices["ticker"] == "SPY"].copy())
+    assert_true(not volume_price["frame"].empty, "Volume-price analysis returned empty frame")
+    assert_true({"date", "close", "volume_ratio", "label", "action", "note"}.issubset(set(volume_price["signals"].columns)), "Volume-price signals missing expected columns")
+    assert_true("当前量价状态" in volume_price["summary"], "Volume-price summary missing current state")
+    assert_true("当前量价状态" in latest_volume_price_note(nvda_indicators), "Volume-price latest note missing current state")
 
     sepa = sepa_dashboard(nvda_raw, prices.loc[prices["ticker"] == "TSLA"].copy())
     assert_true(not sepa["summary"].empty, "Trade Skills SEPA summary returned empty data")
@@ -279,8 +285,9 @@ def main():
             "US stock daily trend": {"metrics": stock_metrics, "status": stock_status},
             "Crypto hourly mean reversion": {"metrics": crypto_metrics, "status": crypto_status},
         },
+        volume_price_note=volume_price["summary"],
     )
-    for token in ["Long-term observation desk", "Paper bot review", "continue"]:
+    for token in ["Long-term observation desk", "Paper bot review", "Volume-price note", "continue"]:
         assert_true(token in report, f"Report missing {token}")
 
     print("All Trade Lab demo checks passed.")

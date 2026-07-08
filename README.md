@@ -77,6 +77,7 @@ The Stock Detail and K-line Lab pages support:
 - local OHLCV resampling for weekly/monthly/quarterly/yearly bars
 - dynamic `1W / 1M / 1Q / YTD / 1Y / ALL` range buttons and dark range sliders on time-series charts
 - KDJ, RSI, MACD, Bollinger Bands, moving averages, volatility, and relative strength
+- manual volume-price state overlay: high/low position, volume surge/quiet, price-volume combinations, gap status, yearly-line context, market-breakdown note, chart markers, and a table of triggered rules
 - coverage notes so live/free-source limits are visible
 
 ## Data Edge Radar / Multi-Market Quant Desk

@@ -42,6 +42,7 @@ from src.backtest_lab.batch import BATCH_STRATEGY_GRIDS, run_batch_backtest
 from src.kline.indicators import add_indicators, classify_regime, relative_strength
 from src.kline.abu_research import atr_research, gap_analysis, rolling_correlation_matrix, similar_paths
 from src.kline.timeframes import apply_asof, coverage_summary, resample_ohlcv
+from src.kline.volume_price import analyze_volume_price_state, latest_volume_price_note
 from src.data_sources.live_sources import fetch_yfinance_prices
 from src.long_term.scoring import SCORE_COLUMNS, build_score_table
 from src.long_term.thesis import get_ticker_profile, latest_financial_snapshot
@@ -516,7 +517,7 @@ def style_figure(fig, height=None, time_axis=False):
     return fig
 
 
-def plot_kline(df, title, forecast=None):
+def plot_kline(df, title, forecast=None, signal_markers=None):
     fig = go.Figure()
     fig.add_trace(
         go.Candlestick(
@@ -564,6 +565,26 @@ def plot_kline(df, title, forecast=None):
                 opacity=0.18,
             )
         )
+    if signal_markers is not None and not signal_markers.empty:
+        for action, markers in signal_markers.groupby("action"):
+            fig.add_trace(
+                go.Scatter(
+                    x=markers["date"],
+                    y=markers["close"],
+                    mode="markers+text",
+                    name=f"Volume-price: {action}",
+                    text=markers["marker_text"],
+                    textposition="top center",
+                    marker=dict(
+                        size=11,
+                        color=markers["color"],
+                        symbol="diamond",
+                        line=dict(color="#151716", width=1),
+                    ),
+                    hovertext=markers["note"],
+                    hoverinfo="text+x+y",
+                )
+            )
     fig.update_layout(title=title, height=470, legend_title="")
     style_figure(fig, 470, time_axis=True)
     st.plotly_chart(fig, use_container_width=True)
@@ -1056,7 +1077,8 @@ def page_kline_lab(prices, forecasts, market_universe, data_mode):
         and ticker in set(forecasts["ticker"])
     )
     forecast = filter_forecast_for_chart(forecasts.loc[forecasts["ticker"] == ticker], ticker_prices) if use_forecast else pd.DataFrame()
-    benchmark_raw = prices.loc[prices["ticker"] == "TSM"].copy()
+    benchmark_symbol = "SPY" if "SPY" in set(prices["ticker"]) else "TSM"
+    benchmark_raw = prices.loc[prices["ticker"] == benchmark_symbol].copy()
     benchmark = apply_asof(resample_ohlcv(benchmark_raw, timeframe, "date"), as_of) if not benchmark_raw.empty else pd.DataFrame()
     rs = relative_strength(ticker_prices, benchmark) if ticker != "TSM" and not benchmark.empty else pd.DataFrame()
 
@@ -1085,7 +1107,25 @@ def page_kline_lab(prices, forecasts, market_universe, data_mode):
         f'<div class="runjin-note">K-line coverage: {coverage_summary(ticker_prices)} / {source_note}. Forecast overlay is off by default, research-only, hidden during replay, and filtered for price-scale sanity.</div>',
         unsafe_allow_html=True,
     )
-    plot_kline(ticker_prices, f"{ticker} {timeframe} Indicators / Replay as of {as_of}", forecast)
+    volume_price_context = f"{ticker}|{timeframe}|{as_of}"
+    if st.button("Show volume-price state", key="vp_show"):
+        st.session_state["volume_price_context"] = volume_price_context
+    show_volume_price = st.session_state.get("volume_price_context") == volume_price_context
+    volume_price = analyze_volume_price_state(ticker_prices, benchmark) if show_volume_price else None
+    markers = volume_price["markers"] if volume_price else None
+    plot_kline(ticker_prices, f"{ticker} {timeframe} Indicators / Replay as of {as_of}", forecast, markers)
+
+    if volume_price:
+        st.markdown(f'<div class="runjin-note">{volume_price["summary"]}</div>', unsafe_allow_html=True)
+        signal_view = volume_price["signals"].head(30).copy()
+        if not signal_view.empty:
+            signal_view["date"] = pd.to_datetime(signal_view["date"]).dt.strftime("%Y-%m-%d")
+            named_table(
+                "Volume-price rule marks",
+                signal_view[["date", "close", "volume_ratio", "price_zone", "volume_state", "price_state", "label", "action", "note"]].round(4),
+            )
+        else:
+            named_table("Volume-price rule marks", pd.DataFrame([{"note": "No volume-price rule was triggered in the recent window"}]))
 
     indicator_view = ticker_prices.tail(30)[
         ["date", "close", "ma20", "ma60", "rsi14", "macd", "macd_signal", "bb_lower", "bb_upper", "kdj_k", "kdj_d", "kdj_j"]
@@ -1629,12 +1669,15 @@ def page_weekly_report(prices, crypto, scored, risk_rules):
         crypto_metrics = disabled_bot_metrics()
         crypto_status = "PAUSE"
         crypto_reason = "Crypto live source unavailable"
+    nvda_benchmark = prices.loc[prices["ticker"] == "SPY"].copy() if "SPY" in set(prices["ticker"]) else pd.DataFrame()
+    volume_price_note = latest_volume_price_note(add_indicators(prices.loc[prices["ticker"] == "NVDA"].copy()), nvda_benchmark)
     report = build_weekly_report(
         scored,
         {
             "US stock daily trend": {"metrics": stock_metrics, "status": stock_status, "reason": stock_reason},
             "Crypto hourly mean reversion": {"metrics": crypto_metrics, "status": crypto_status, "reason": crypto_reason},
         },
+        volume_price_note=volume_price_note,
     )
     st.markdown(report)
 
