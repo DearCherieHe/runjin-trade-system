@@ -8,6 +8,7 @@ from src.data_sources.loaders import (
     get_data_source_status,
     load_crypto_prices,
     load_financials,
+    load_future_industry_map,
     load_kronos_forecast,
     load_market_universe,
     load_prices,
@@ -46,6 +47,7 @@ from src.kline.timeframes import apply_asof, coverage_summary, resample_ohlcv
 from src.kline.volume_price import analyze_volume_price_state, latest_volume_price_note
 from src.data_sources.live_sources import fetch_yfinance_prices
 from src.long_term.scoring import SCORE_COLUMNS, build_score_table
+from src.long_term.industry_map import build_future_profile, future_theme_summary, industry_layer_scores, relationship_comparison
 from src.long_term.thesis import get_ticker_profile, latest_financial_snapshot
 from src.quant_bot.paper_trader import run_crypto_paper, run_us_stock_paper
 from src.reports.weekly_report import build_weekly_report
@@ -398,13 +400,14 @@ def load_all_data(data_mode):
     financials = load_financials(data_mode=data_mode)
     market_universe = load_market_universe(data_mode=data_mode)
     notes = load_watchlist_notes()
+    industry_map = load_future_industry_map()
     forecasts = load_kronos_forecast(data_mode=data_mode)
     finance_research, finance_mcp_status = load_finance_mcp_research(data_mode=data_mode)
     risk_rules = load_risk_rules()
     scored = build_score_table(notes)
     source_status = get_data_source_status()
     source_status["finance_mcp"] = finance_mcp_status
-    return prices, crypto, financials, market_universe, scored, forecasts, finance_research, risk_rules, source_status
+    return prices, crypto, financials, market_universe, scored, industry_map, forecasts, finance_research, risk_rules, source_status
 
 
 def fmt_int(value):
@@ -818,6 +821,112 @@ def page_watchlist(scored):
     fig.update_layout(title=f"{selected} component score", yaxis=dict(range=[0, 5]))
     style_figure(fig, 340)
     st.plotly_chart(fig, use_container_width=True)
+
+
+def page_tenbagger_profile(prices, financials, scored, industry_map, forecasts, data_mode):
+    page_header(
+        "Future 10x Map / One Stock at a Time",
+        "未来10倍股 Profile",
+        "A long-term research cockpit that starts from future industries, value-chain layers, monopoly potential, gross-margin power, and upstream/downstream relationships before looking at price.",
+        ["10-year", "Value chain", "Moat", "Peers", "Proof"],
+    )
+    if industry_map.empty:
+        st.warning("No future industry map is available.")
+        return
+    theme_filter = st.selectbox("Future industry", ["ALL"] + sorted(industry_map["mega_theme"].dropna().unique().tolist()))
+    filtered = industry_map if theme_filter == "ALL" else industry_map.loc[industry_map["mega_theme"] == theme_filter]
+    ticker = st.selectbox("Stock", filtered["ticker"].drop_duplicates().tolist(), key="tenbagger_ticker")
+    profile = build_future_profile(industry_map, scored, ticker)
+    if not profile:
+        st.warning(f"No future profile is configured for {ticker}.")
+        return
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Mega theme", profile.get("mega_theme", "N/A"))
+    col2.metric("Chain layer", profile.get("chain_layer", "N/A"))
+    col3.metric("Moat score", f"{profile.get('moat_total', 0):.0f} / 20")
+    col4.metric("Moat label", profile.get("moat_label", "N/A"))
+
+    st.markdown(
+        f"""
+        <div class="runjin-thesis">
+          <h4>{profile.get("ticker")} / {profile.get("company")}</h4>
+          <p><strong>Role:</strong> {profile.get("chain_role", "")}</p>
+          <p><strong>Why it can 10x:</strong> {profile.get("why_it_can_10x", "")}</p>
+          <p><strong>Key question:</strong> {profile.get("key_questions", "")}</p>
+          <p><strong>Risk flags:</strong> {profile.get("risk_flags", "")}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    score_cols = ["monopoly_score", "gross_margin_power", "irreplaceability", "ten_year_optionality", "capital_intensity"]
+    score_df = pd.DataFrame(
+        {
+            "dimension": ["Monopoly", "Gross margin", "Irreplaceable", "10Y optionality", "Capital intensity"],
+            "score": [float(profile.get(col, 0) or 0) for col in score_cols],
+        }
+    )
+    fig = go.Figure(go.Bar(x=score_df["dimension"], y=score_df["score"], marker_color=["#2ed17c", "#d8cb5f", "#a891ff", "#ff78b7", "#ff5f64"]))
+    fig.update_layout(title=f"{ticker} value-chain quality", yaxis=dict(range=[0, 5]))
+    style_figure(fig, 330)
+    st.plotly_chart(fig, use_container_width=True)
+
+    tabs = st.tabs(["Industry Map", "Relationship Compare", "Company Proof", "K-line Context"])
+    with tabs[0]:
+        theme_summary = future_theme_summary(industry_map)
+        named_table("Future industry map", theme_summary.round(2) if not theme_summary.empty else pd.DataFrame())
+        layer_scores = industry_layer_scores(industry_map, ticker)
+        if not layer_scores.empty:
+            fig_layer = go.Figure(
+                go.Bar(
+                    x=layer_scores["chain_layer"],
+                    y=layer_scores["avg_moat"],
+                    text=layer_scores["tickers"],
+                    marker_color=["#2ed17c" if selected else "#303631" for selected in layer_scores["selected"]],
+                )
+            )
+            fig_layer.update_layout(title=f"{profile.get('mega_theme')} value-chain layer quality", yaxis_title="Average moat score")
+            style_figure(fig_layer, 330)
+            st.plotly_chart(fig_layer, use_container_width=True)
+            named_table("Theme value-chain layers", layer_scores.round(2))
+    with tabs[1]:
+        compare = relationship_comparison(industry_map, scored, ticker)
+        display_cols = [
+            "relationship",
+            "ticker",
+            "company",
+            "chain_layer",
+            "chain_role",
+            "moat_total",
+            "score_label",
+            "why_it_can_10x",
+            "key_questions",
+        ]
+        named_table("Upstream / peers / downstream comparison", compare[[col for col in display_cols if col in compare.columns]].round(2))
+    with tabs[2]:
+        scored_row = scored.loc[scored["ticker"] == ticker] if ticker in set(scored["ticker"]) else pd.DataFrame()
+        ticker_financials = financials.loc[financials["ticker"] == ticker].sort_values("quarter") if ticker in set(financials["ticker"]) else pd.DataFrame()
+        if not scored_row.empty:
+            row = scored_row.iloc[0]
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Long score", row["score_label"])
+            c2.metric("Bucket", row["bucket"])
+            c3.metric("Value-chain score", f"{row['value_chain_position']} / 5")
+            named_table("Long thesis", scored_row[["ticker", "company", "narrative", "growth_evidence", "catalysts", "invalidation", "buy_plan"]])
+        else:
+            st.info("This ticker is in the future industry map but not yet in the scored long watchlist.")
+        if not ticker_financials.empty:
+            named_table("Financial proof", ticker_financials)
+    with tabs[3]:
+        raw_kline, source_note = build_ticker_kline(prices, ticker, "1D", None, data_mode)
+        if raw_kline.empty:
+            st.info(f"No K-line data loaded for {ticker}. {source_note}")
+        else:
+            ticker_prices = add_indicators(raw_kline)
+            forecast = filter_forecast_for_chart(forecasts.loc[forecasts["ticker"] == ticker], ticker_prices) if ticker in set(forecasts["ticker"]) else pd.DataFrame()
+            st.markdown(f'<div class="runjin-note">K-line is context only: {coverage_summary(ticker_prices)} / {source_note}</div>', unsafe_allow_html=True)
+            plot_kline(ticker_prices, f"{ticker} long-term K-line context", forecast)
 
 
 def plot_market_kline(symbol_df, ticker, market):
@@ -1739,21 +1848,21 @@ def page_weekly_report(prices, crypto, scored, risk_rules):
     st.markdown(report)
 
 
-def page_long_research_desk(prices, crypto, financials, market_universe, scored, forecasts, finance_research, source_status, data_mode):
+def page_long_research_desk(prices, crypto, financials, market_universe, scored, industry_map, forecasts, finance_research, source_status, data_mode):
     subpage = st.radio(
         "Research layer",
-        ["Market Universe", "Long Watchlist", "Finance Radar", "Symbol Cockpit", "Research Journal"],
+        ["10x Stock Profile", "Market Universe", "Long Watchlist", "Finance Radar", "Research Journal"],
         horizontal=True,
         key="long_research_layer",
     )
-    if subpage == "Market Universe":
+    if subpage == "10x Stock Profile":
+        page_tenbagger_profile(prices, financials, scored, industry_map, forecasts, data_mode)
+    elif subpage == "Market Universe":
         page_market_universe(market_universe)
     elif subpage == "Long Watchlist":
         page_watchlist(scored)
     elif subpage == "Finance Radar":
         page_finance_mcp_radar(finance_research, scored, source_status, prices, crypto)
-    elif subpage == "Symbol Cockpit":
-        page_symbol_cockpit(prices, crypto, financials, scored, forecasts, data_mode)
     elif subpage == "Research Journal":
         page_research_journal(scored)
 
@@ -1795,7 +1904,7 @@ def main():
         unsafe_allow_html=True,
     )
     try:
-        prices, crypto, financials, market_universe, scored, forecasts, finance_research, risk_rules, source_status = load_all_data(data_mode)
+        prices, crypto, financials, market_universe, scored, industry_map, forecasts, finance_research, risk_rules, source_status = load_all_data(data_mode)
     except Exception as exc:
         st.sidebar.error(f"Realtime data failed: {exc}")
         st.sidebar.caption("The app is now configured to use real-time research data only, so it stops instead of falling back to bundled samples.")
@@ -1813,7 +1922,7 @@ def main():
     if page == "Dashboard":
         page_dashboard(prices, crypto, market_universe, scored, finance_research, risk_rules, source_status)
     elif page == "Research Desk":
-        page_long_research_desk(prices, crypto, financials, market_universe, scored, forecasts, finance_research, source_status, data_mode)
+        page_long_research_desk(prices, crypto, financials, market_universe, scored, industry_map, forecasts, finance_research, source_status, data_mode)
     elif page == "Signal Lab":
         page_signal_lab(prices, crypto, forecasts, market_universe, data_mode)
     elif page == "Capital Rotation":

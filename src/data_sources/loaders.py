@@ -270,6 +270,10 @@ def load_watchlist_notes() -> pd.DataFrame:
     return pd.read_csv(SAMPLE_DIR / "watchlist_notes.csv")
 
 
+def load_future_industry_map() -> pd.DataFrame:
+    return pd.read_csv(SAMPLE_DIR / "future_industry_map.csv")
+
+
 def load_kronos_forecast(data_mode=None) -> pd.DataFrame:
     mode = _normalize_mode(data_mode)
     if mode in {"live", "live_auto"}:

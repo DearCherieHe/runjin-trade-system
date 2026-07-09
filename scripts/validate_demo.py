@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 from src.data_sources.loaders import (
     load_crypto_prices,
     load_financials,
+    load_future_industry_map,
     load_market_universe,
     load_prices,
     load_risk_rules,
@@ -50,6 +51,7 @@ from src.kline.indicators import add_indicators
 from src.kline.launch_points import launch_point_analysis
 from src.kline.volume_price import analyze_volume_price_state, latest_volume_price_note
 from src.long_term.scoring import SCORE_COLUMNS, build_score_table
+from src.long_term.industry_map import build_future_profile, future_theme_summary, industry_layer_scores, relationship_comparison
 from src.quant_bot.paper_trader import run_crypto_paper, run_us_stock_paper
 from src.quant_bot.risk import evaluate_risk
 from src.reports.weekly_report import build_weekly_report
@@ -72,6 +74,7 @@ def main():
     financials = load_financials(data_mode="sample")
     market_universe = load_market_universe(data_mode="sample")
     notes = load_watchlist_notes()
+    industry_map = load_future_industry_map()
     risk_rules = load_risk_rules()
     scored = build_score_table(notes)
 
@@ -105,6 +108,30 @@ def main():
     assert_true((scored.sort_values("ticker")[SCORE_COLUMNS].sum(axis=1).reset_index(drop=True) >= 0).all(), "Invalid scores")
     assert_true(score_check.max() <= 35, "Score exceeds 35")
     assert_true(set(scored["bucket"]).issubset({"Deep research candidate", "Observation pool", "Low priority"}), "Invalid bucket")
+    required_industry_cols = {
+        "ticker",
+        "mega_theme",
+        "industry",
+        "chain_layer",
+        "chain_role",
+        "upstream_tickers",
+        "peer_tickers",
+        "downstream_tickers",
+        "monopoly_score",
+        "gross_margin_power",
+        "irreplaceability",
+        "ten_year_optionality",
+        "why_it_can_10x",
+        "key_questions",
+    }
+    assert_true(required_industry_cols.issubset(set(industry_map.columns)), "Future industry map missing required columns")
+    assert_true(set(tickers).issubset(set(industry_map["ticker"])), "Future industry map must cover configured watchlist tickers")
+    nvda_profile = build_future_profile(industry_map, scored, "NVDA")
+    assert_true(nvda_profile.get("moat_total", 0) > 0 and nvda_profile.get("mega_theme") == "AI算力", "Future profile did not build NVDA profile")
+    assert_true(not future_theme_summary(industry_map).empty, "Future theme summary returned empty data")
+    assert_true(not industry_layer_scores(industry_map, "NVDA").empty, "Industry layer scores returned empty data")
+    relationships = relationship_comparison(industry_map, scored, "NVDA")
+    assert_true({"selected", "upstream", "peer", "downstream"}.issubset(set(relationships["relationship"])), "Relationship comparison missing upstream/peer/downstream links")
 
     stock_bt, stock_metrics, stock_trades, stock_status, _ = run_us_stock_paper(
         prices.loc[prices["ticker"] == "NVDA"].copy(), risk_rules
