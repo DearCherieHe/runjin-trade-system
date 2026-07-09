@@ -47,6 +47,7 @@ from src.backtest_lab.position_sizing import atr_position_size
 from src.backtest_lab.ump_lite import evaluate_ump_lite
 from src.kline.abu_research import atr_research, gap_analysis, rolling_correlation_matrix, similar_paths
 from src.kline.indicators import add_indicators
+from src.kline.launch_points import launch_point_analysis
 from src.kline.volume_price import analyze_volume_price_state, latest_volume_price_note
 from src.long_term.scoring import SCORE_COLUMNS, build_score_table
 from src.quant_bot.paper_trader import run_crypto_paper, run_us_stock_paper
@@ -315,6 +316,15 @@ def main():
     assert_true(not atr_view.empty and atr_view["atr_pct"].notna().sum() > 0, "ATR research returned empty data")
     assert_true(not corr.empty, "Rolling correlation matrix returned empty data")
     assert_true(not similar.empty, "Similar path research returned empty data")
+    launch = launch_point_analysis(nvda_indicators)
+    assert_true({"summary", "signals", "levels", "plan"}.issubset(set(launch.keys())), "Launch point analysis missing expected outputs")
+    assert_true(not launch["plan"].empty, "Launch point risk plan returned empty data")
+    launch_abnormal = launch_point_analysis(add_indicators(abnormal))
+    assert_true(not launch_abnormal["signals"].empty, "Launch point analysis did not detect injected abnormal launch candidate")
+    assert_true(
+        {"date", "signal_type", "status", "confidence", "entry_zone", "stop_level", "trailing_stop", "note"}.issubset(set(launch_abnormal["signals"].columns)),
+        "Launch point signals missing expected columns",
+    )
     volume_price = analyze_volume_price_state(nvda_indicators, prices.loc[prices["ticker"] == "SPY"].copy())
     assert_true(not volume_price["frame"].empty, "Volume-price analysis returned empty frame")
     assert_true({"date", "close", "volume_ratio", "label", "action", "note"}.issubset(set(volume_price["signals"].columns)), "Volume-price signals missing expected columns")

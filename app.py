@@ -41,6 +41,7 @@ from src.backtest_lab.engine import (
 from src.backtest_lab.batch import BATCH_STRATEGY_GRIDS, run_batch_backtest
 from src.kline.indicators import add_indicators, classify_regime, relative_strength
 from src.kline.abu_research import atr_research, gap_analysis, rolling_correlation_matrix, similar_paths
+from src.kline.launch_points import launch_point_analysis
 from src.kline.timeframes import apply_asof, coverage_summary, resample_ohlcv
 from src.kline.volume_price import analyze_volume_price_state, latest_volume_price_note
 from src.data_sources.live_sources import fetch_yfinance_prices
@@ -1138,6 +1139,26 @@ def page_kline_lab(prices, forecasts, market_universe, data_mode):
         style_figure(fig, 320, time_axis=True)
         st.plotly_chart(fig, use_container_width=True)
 
+    section_label("Launch Point Research")
+    launch = launch_point_analysis(ticker_prices)
+    st.markdown(
+        f'<div class="runjin-note">{launch["summary"]}<br>Charts are records of market participants\' expectations, fear, greed, and forced behavior. Similar patterns are useful research context, not deterministic prophecy.</div>',
+        unsafe_allow_html=True,
+    )
+    launch_signals = launch["signals"]
+    if not launch_signals.empty:
+        signal_view = launch_signals.head(20).copy()
+        signal_view["date"] = pd.to_datetime(signal_view["date"]).dt.strftime("%Y-%m-%d")
+        named_table("Launch point candidates", signal_view)
+    else:
+        named_table("Launch point candidates", pd.DataFrame([{"note": "No major launch-point candidate in the current window"}]))
+    col_levels, col_plan = st.columns(2)
+    with col_levels:
+        levels = launch["levels"]
+        named_table("Original-control proxy levels", levels.round(3) if not levels.empty else pd.DataFrame([{"note": "No nearby high-evidence pivot levels"}]))
+    with col_plan:
+        named_table("Launch risk plan", launch["plan"])
+
     section_label("ABU-style Research Context")
     st.markdown(
         '<div class="runjin-note">Gap, ATR, correlation, and similar-path diagnostics are research-only context rebuilt for RunJin. They do not create executable trading instructions.</div>',
@@ -1349,7 +1370,7 @@ def page_backtest_lab(prices, crypto):
         raw = resample_ohlcv(raw, timeframe, "date")
     else:
         if crypto.empty:
-            st.warning("Crypto live data is unavailable. Switch to US stock or Live auto/Sample only for crypto backtests.")
+            st.warning("Crypto live data is unavailable. The workspace is fixed to realtime data only, so no sample fallback is shown.")
             return
         ticker = st.selectbox("Symbol", sorted(crypto["symbol"].unique()), index=0, key="bt_symbol")
         raw = crypto.loc[crypto["symbol"] == ticker].copy()
@@ -1718,6 +1739,40 @@ def page_weekly_report(prices, crypto, scored, risk_rules):
     st.markdown(report)
 
 
+def page_long_research_desk(prices, crypto, financials, market_universe, scored, forecasts, finance_research, source_status, data_mode):
+    subpage = st.radio(
+        "Research layer",
+        ["Market Universe", "Long Watchlist", "Finance Radar", "Symbol Cockpit", "Research Journal"],
+        horizontal=True,
+        key="long_research_layer",
+    )
+    if subpage == "Market Universe":
+        page_market_universe(market_universe)
+    elif subpage == "Long Watchlist":
+        page_watchlist(scored)
+    elif subpage == "Finance Radar":
+        page_finance_mcp_radar(finance_research, scored, source_status, prices, crypto)
+    elif subpage == "Symbol Cockpit":
+        page_symbol_cockpit(prices, crypto, financials, scored, forecasts, data_mode)
+    elif subpage == "Research Journal":
+        page_research_journal(scored)
+
+
+def page_signal_lab(prices, crypto, forecasts, market_universe, data_mode):
+    subpage = st.radio(
+        "Signal layer",
+        ["K-line & Launch Points", "SEPA Trend Template", "Intraday Scenarios"],
+        horizontal=True,
+        key="trading_signal_layer",
+    )
+    if subpage == "K-line & Launch Points":
+        page_kline_lab(prices, forecasts, market_universe, data_mode)
+    elif subpage == "SEPA Trend Template":
+        page_sepa_lab(prices)
+    elif subpage == "Intraday Scenarios":
+        page_intraday_signal(prices, crypto, data_mode)
+
+
 def main():
     inject_design_system()
     st.sidebar.markdown(
@@ -1729,72 +1784,45 @@ def main():
         """,
         unsafe_allow_html=True,
     )
-    data_mode_label = st.sidebar.radio(
-        "Data mode",
-        ["Live auto", "Sample only", "Live strict"],
-        index=0,
-        help="Live auto tries current market sources first and falls back to bundled samples when a public source is blocked or empty.",
+    data_mode = "live"
+    st.sidebar.markdown(
+        """
+        <div class="runjin-note" style="margin-bottom: 12px;">
+          Data source: <strong>Realtime research feed</strong><br>
+          No bundled sample fallback is used in this mode.
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    data_mode = {
-        "Live auto": "live_auto",
-        "Sample only": "sample",
-        "Live strict": "live",
-    }[data_mode_label]
     try:
         prices, crypto, financials, market_universe, scored, forecasts, finance_research, risk_rules, source_status = load_all_data(data_mode)
     except Exception as exc:
-        st.sidebar.error(f"Live strict failed: {exc}")
-        st.sidebar.caption("Switch to Live auto or Sample only to keep the workspace running when public data sources are unavailable.")
+        st.sidebar.error(f"Realtime data failed: {exc}")
+        st.sidebar.caption("The app is now configured to use real-time research data only, so it stops instead of falling back to bundled samples.")
         st.stop()
-    page = st.sidebar.radio(
-        "Workspace",
-        [
-            "Dashboard",
-            "Market Universe",
-            "Long Watchlist",
-            "Finance MCP Radar",
-            "Symbol Cockpit",
-            "Stock Detail",
-            "K-line Lab",
-            "SEPA Lab",
-            "Intraday Signal",
-            "Capital Rotation",
-            "Research Journal",
-            "Backtest Lab",
-            "Short Bot",
-            "Weekly Report",
-        ],
+    desk = st.sidebar.radio("Workbench", ["Long-term Investing", "Mid/Short Trading"], index=0)
+    page_options = (
+        ["Dashboard", "Research Desk", "Weekly Review"]
+        if desk == "Long-term Investing"
+        else ["Dashboard", "Signal Lab", "Capital Rotation", "Backtest Lab", "Paper Bot", "Weekly Review"]
     )
+    page = st.sidebar.radio("Workspace", page_options)
     st.sidebar.caption(f"MODE / {data_mode}")
     st.sidebar.caption("BOUNDARY / V0.1 never places real orders.")
 
     if page == "Dashboard":
         page_dashboard(prices, crypto, market_universe, scored, finance_research, risk_rules, source_status)
-    elif page == "Market Universe":
-        page_market_universe(market_universe)
-    elif page == "Long Watchlist":
-        page_watchlist(scored)
-    elif page == "Finance MCP Radar":
-        page_finance_mcp_radar(finance_research, scored, source_status, prices, crypto)
-    elif page == "Symbol Cockpit":
-        page_symbol_cockpit(prices, crypto, financials, scored, forecasts, data_mode)
-    elif page == "Stock Detail":
-        page_stock_detail(prices, financials, scored, forecasts, data_mode)
-    elif page == "K-line Lab":
-        page_kline_lab(prices, forecasts, market_universe, data_mode)
-    elif page == "SEPA Lab":
-        page_sepa_lab(prices)
-    elif page == "Intraday Signal":
-        page_intraday_signal(prices, crypto, data_mode)
+    elif page == "Research Desk":
+        page_long_research_desk(prices, crypto, financials, market_universe, scored, forecasts, finance_research, source_status, data_mode)
+    elif page == "Signal Lab":
+        page_signal_lab(prices, crypto, forecasts, market_universe, data_mode)
     elif page == "Capital Rotation":
         page_capital_rotation(prices)
-    elif page == "Research Journal":
-        page_research_journal(scored)
     elif page == "Backtest Lab":
         page_backtest_lab(prices, crypto)
-    elif page == "Short Bot":
+    elif page == "Paper Bot":
         page_short_bot(prices, crypto, risk_rules)
-    elif page == "Weekly Report":
+    elif page == "Weekly Review":
         page_weekly_report(prices, crypto, scored, risk_rules)
 
 

@@ -18,3 +18,12 @@
 - Position size is capped by `configs/risk_rules.yaml`.
 - Daily loss and max drawdown limits trigger a stop status.
 - Kronos-style forecasts are research context only and do not drive order placement.
+
+## Launch Point Research
+
+- K-line patterns are treated as behavioral evidence, not prophecy.
+- Similar patterns can support scenario planning, but every setup still needs invalidation.
+- Launch-point candidates must include a hard stop before any paper-trade idea is considered.
+- If price fails the gap, loses the Bollinger reclaim, breaks the control-point support, or violates the hard stop, the setup is invalid.
+- Favor major trend launch points over short random noise; avoid forcing trades when the panel shows no high-quality candidate.
+- When a launch works, prefer trailing-stop exit logic so profits can run without guessing the exact top.

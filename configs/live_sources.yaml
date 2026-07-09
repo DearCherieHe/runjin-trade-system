@@ -1,5 +1,5 @@
 mode:
-  default: live_auto
+  default: live
   fallback: sample
 free_sources:
   us_equities:
