@@ -8,13 +8,19 @@ from src.data_sources.loaders import (
     get_data_source_status,
     load_crypto_prices,
     load_financials,
-    load_future_industry_map,
     load_kronos_forecast,
     load_market_universe,
     load_prices,
     load_risk_rules,
     load_watchlist_notes,
 )
+try:
+    from src.data_sources.loaders import load_future_industry_map
+except ImportError:
+    def load_future_industry_map() -> pd.DataFrame:
+        sample_path = Path(__file__).resolve().parent / "data" / "sample" / "future_industry_map.csv"
+        return pd.read_csv(sample_path)
+
 from src.data_sources.finance_mcp import load_finance_mcp_capabilities, load_finance_mcp_research
 from src.data_sources.market_universe import ensure_market_universe_columns
 from src.ashare_workbench.levels import key_price_levels
