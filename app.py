@@ -4,22 +4,65 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.data_sources.loaders import (
-    get_data_source_status,
-    load_crypto_prices,
-    load_financials,
-    load_kronos_forecast,
-    load_market_universe,
-    load_prices,
-    load_risk_rules,
-    load_watchlist_notes,
-)
+APP_ROOT = Path(__file__).resolve().parent
+SAMPLE_DIR = APP_ROOT / "data" / "sample"
+
 try:
-    from src.data_sources.loaders import load_future_industry_map
-except ImportError:
+    from src.data_sources.loaders import (
+        get_data_source_status,
+        load_crypto_prices,
+        load_financials,
+        load_future_industry_map,
+        load_kronos_forecast,
+        load_market_universe,
+        load_prices,
+        load_risk_rules,
+        load_watchlist_notes,
+    )
+except ImportError as loaders_import_error:
+    LOADERS_IMPORT_ERROR = loaders_import_error
+
+    def get_data_source_status() -> dict:
+        return {
+            "startup": {
+                "mode": "sample_fallback",
+                "source": "local_sample",
+                "message": f"Data loader import failed; using bundled samples: {LOADERS_IMPORT_ERROR}",
+            }
+        }
+
+    def load_prices(data_mode=None) -> pd.DataFrame:
+        return pd.read_csv(SAMPLE_DIR / "us_stock_ohlcv.csv", parse_dates=["date"])
+
+    def load_crypto_prices(data_mode=None) -> pd.DataFrame:
+        return pd.read_csv(SAMPLE_DIR / "crypto_ohlcv_hourly.csv", parse_dates=["datetime"])
+
+    def load_financials(data_mode=None) -> pd.DataFrame:
+        return pd.read_csv(SAMPLE_DIR / "financial_metrics.csv", parse_dates=["quarter"])
+
+    def load_kronos_forecast(data_mode=None) -> pd.DataFrame:
+        return pd.read_csv(SAMPLE_DIR / "kronos_forecast_sample.csv", parse_dates=["date"])
+
+    def load_market_universe(data_mode=None) -> pd.DataFrame:
+        prices = load_prices(data_mode)
+        return prices[["ticker"]].drop_duplicates().assign(market="US", source="sample_fallback")
+
+    def load_risk_rules() -> dict:
+        return {
+            "capital": {"starting_cash": 100000, "max_position_pct": 0.12, "no_leverage": True},
+            "risk_limits": {
+                "max_daily_loss_pct": 0.03,
+                "max_drawdown_pct": 0.12,
+                "per_trade_stop_loss_pct": 0.06,
+                "min_cash_pct": 0.25,
+            },
+        }
+
+    def load_watchlist_notes() -> pd.DataFrame:
+        return pd.read_csv(SAMPLE_DIR / "watchlist_notes.csv")
+
     def load_future_industry_map() -> pd.DataFrame:
-        sample_path = Path(__file__).resolve().parent / "data" / "sample" / "future_industry_map.csv"
-        return pd.read_csv(sample_path)
+        return pd.read_csv(SAMPLE_DIR / "future_industry_map.csv")
 
 from src.data_sources.finance_mcp import load_finance_mcp_capabilities, load_finance_mcp_research
 from src.data_sources.market_universe import ensure_market_universe_columns
@@ -51,7 +94,12 @@ from src.kline.abu_research import atr_research, gap_analysis, rolling_correlati
 from src.kline.launch_points import launch_point_analysis
 from src.kline.timeframes import apply_asof, coverage_summary, resample_ohlcv
 from src.kline.volume_price import analyze_volume_price_state, latest_volume_price_note
-from src.data_sources.live_sources import fetch_yfinance_prices
+try:
+    from src.data_sources.live_sources import fetch_yfinance_prices
+except ImportError:
+    def fetch_yfinance_prices(tickers, period="max", interval="1d") -> pd.DataFrame:
+        prices = pd.read_csv(SAMPLE_DIR / "us_stock_ohlcv.csv", parse_dates=["date"])
+        return prices[prices["ticker"].isin(tickers)].copy()
 from src.long_term.scoring import SCORE_COLUMNS, build_score_table
 from src.long_term.industry_map import build_future_profile, future_theme_summary, industry_layer_scores, relationship_comparison
 from src.long_term.thesis import get_ticker_profile, latest_financial_snapshot
@@ -63,7 +111,7 @@ from src.trade_skills.journal import build_markdown_note, default_deep_dive_sect
 from src.trade_skills.sepa import sepa_dashboard, sepa_entry_plan
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = APP_ROOT
 
 st.set_page_config(page_title="RunJin Trade System", layout="wide")
 
