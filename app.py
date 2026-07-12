@@ -71,6 +71,7 @@ from src.data_sources.market_universe import ensure_market_universe_columns
 from src.data_sources.sync import result_to_frames, sync_single_quote
 from src.core.cache import CacheManager
 from src.core.llm_providers import provider_table, task_policy_table
+from src.ashare_workbench.agent_framework import astock_agent_tables, astock_decision_prompt
 from src.ashare_workbench.levels import key_price_levels
 from src.market_workbench.core import (
     STRATEGY_DESCRIPTIONS,
@@ -1954,6 +1955,83 @@ def page_batch_analysis(scored, financials):
         named_table("Batch long analysis", view)
 
 
+def page_astock_agent_framework(scored):
+    page_header(
+        "A-Share Agents / Decision Chain",
+        "A股研判",
+        "把市场、情绪、新闻、基本面、政策、资金和解禁放进同一条决策链，先判断是否值得继续跟踪，再决定仓位和失效条件。",
+        ["A股约束", "多空辩论", "风险分层"],
+    )
+    tables = astock_agent_tables()
+
+    symbol_options = scored["ticker"].tolist() if "ticker" in scored else []
+    default_symbol = symbol_options[0] if symbol_options else "300124.SZ"
+    natural_task = st.text_input(
+        "自然语言任务",
+        value="分析汇川技术中线还能不能继续跟踪",
+        key="ashare_natural_task",
+    )
+    col1, col2, col3 = st.columns([1, 1, 2])
+    symbol = col1.selectbox("股票", symbol_options or [default_symbol], key="astock_agent_symbol")
+    horizon = col2.selectbox("周期", ["短线", "中线", "长线"], index=1, key="astock_agent_horizon")
+    thesis = col3.text_input(
+        "核心假设",
+        value="产业趋势向上，公司位置靠前，财报逐步验证，估值仍有安全边际，周/月线开始止跌放量。",
+        key="astock_agent_thesis",
+    )
+
+    prompt = astock_decision_prompt(symbol, f"{natural_task}。{thesis}", horizon)
+    render_kpi_grid(
+        [
+            {"label": "入口", "value": "一句话", "note": "先说问题，再选股票"},
+            {"label": "第一步", "value": "7类分析", "note": "先拆证据"},
+            {"label": "第二步", "value": "多空辩论", "note": "主动找反证"},
+            {"label": "输出", "value": "研报卡", "note": "动作、仓位、失效位"},
+        ]
+    )
+
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["研判链路", "分析师分工", "研报卡片", "信号验证", "系统保障", "A股约束", "提示词"])
+    with tab1:
+        named_table("决策流程", tables["pipeline"])
+        named_table("Vibe 研究流", tables["vibe_research_flow"])
+        named_table("日常跟踪闭环", tables["operating_loop"])
+        with st.expander("数据源分工", expanded=False):
+            named_table("A股数据路由", tables["data_routes"])
+    with tab2:
+        named_table("7类分析师检查表", tables["analysts"])
+    with tab3:
+        named_table("结构化研报字段", tables["report_card"])
+        with st.expander("自然语言任务示例", expanded=False):
+            named_table("任务解析示例", tables["intent_examples"])
+    with tab4:
+        named_table("信号准入闸门", tables["signal_gates"])
+        named_table("策略操作系统", tables["strategy_os"])
+        named_table("模拟信号生命周期", tables["paper_signal_lifecycle"])
+        with st.expander("策略代码契约", expanded=False):
+            named_table("策略代码契约", tables["strategy_code_contract"])
+        with st.expander("执行安全模型", expanded=False):
+            named_table("执行安全模型", tables["safety_model"])
+        with st.expander("跟单边界", expanded=False):
+            named_table("跟单与排行榜边界", tables["copy_trading_boundaries"])
+    with tab5:
+        named_table("TradingAgents 原版可吸收能力", tables["upstream_practices"])
+        named_table("决策记忆字段", tables["decision_memory"])
+        named_table("影子账户复盘", tables["shadow_account"])
+    with tab6:
+        named_table("A股交易约束", tables["constraints"])
+    with tab7:
+        st.text_area("可复制给投研小助手的提示词", value=prompt, height=360, key="astock_agent_prompt")
+        if st.button("用 Ollama 跑一版研判", type="primary", key="astock_agent_ollama"):
+            config = load_ollama_config()
+            status = ollama_status(base_url=config["base_url"])
+            if not status["available"]:
+                st.warning("Ollama 还没有连接。线上 Streamlit 页面不能访问你本机的 localhost，需要本地运行系统或配置远程可访问的 Ollama。")
+            else:
+                with st.spinner("正在生成 A股研判..."):
+                    answer = ask_ollama(prompt, model=config["default_model"], base_url=config["base_url"])
+                st.markdown(answer)
+
+
 def page_system_capabilities(source_status):
     page_header(
         "System / Capabilities",
@@ -2398,15 +2476,16 @@ def page_weekly_report(prices, crypto, scored, risk_rules):
 def page_long_research_desk(prices, crypto, financials, market_universe, scored, industry_map, forecasts, finance_research, source_status, data_mode):
     subpage_label = st.radio(
         "研究模块",
-        ["投研小助手", "单股同步", "批量分析", "牛股框架", "股票池", "观察清单", "研究雷达", "研究日志"],
+        ["投研小助手", "单股同步", "批量分析", "A股研判", "牛股框架", "股票池", "观察清单", "研究雷达", "研究日志"],
         horizontal=True,
-        index=5,
+        index=6,
         key="long_research_layer",
     )
     subpage = {
         "投研小助手": "Research Assistant",
         "单股同步": "Single Sync",
         "批量分析": "Batch Analysis",
+        "A股研判": "A-Share Agent Framework",
         "牛股框架": "10x Stock Profile",
         "股票池": "Market Universe",
         "观察清单": "Long Watchlist",
@@ -2419,6 +2498,8 @@ def page_long_research_desk(prices, crypto, financials, market_universe, scored,
         page_single_stock_sync()
     elif subpage == "Batch Analysis":
         page_batch_analysis(scored, financials)
+    elif subpage == "A-Share Agent Framework":
+        page_astock_agent_framework(scored)
     elif subpage == "10x Stock Profile":
         page_tenbagger_profile(prices, financials, scored, industry_map, forecasts, data_mode)
     elif subpage == "Market Universe":

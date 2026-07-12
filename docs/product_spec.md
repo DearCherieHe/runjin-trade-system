@@ -80,3 +80,66 @@ The system borrows product ideas from TradingAgents-CN while keeping the impleme
 - Batch analysis: multiple watchlist names can be ranked in one pass by score and latest financial proof.
 - Report export: Markdown export is available now; Word/PDF are listed as planned export backends.
 - Debug visibility: data-source status and low-level plumbing stay under `系统能力`, not on the first screen.
+
+## TradingAgents-Astock Inspired Capabilities
+
+The A-share research flow borrows the decision structure from TradingAgents-Astock, but presents it as a compact trader-facing checklist instead of an engineering graph:
+
+- A-share analyst chain: market, sentiment, news, fundamentals, policy, hot-money flow, and unlock/insider-selling checks.
+- Debate structure: Bull vs Bear first, then Research Manager synthesis, then aggressive/neutral/conservative risk opinions.
+- A-share constraints: T+1, price limits, 100-share lots, ST/delisting risk, and trading-session behavior must affect the final plan.
+- Data routing principle: prefer stable free data sources for routine quotes, and reserve Eastmoney/Tonghuashun-style sources for unique A-share data such as hot money, unlocks, and consensus.
+- Output discipline: every result should end with one action, position ceiling, invalidation condition, and the next data point to verify.
+
+## TradingAgents-AShare Inspired Capabilities
+
+KylinMountain/TradingAgents-AShare adds a stronger daily-operator lens. RunJin should absorb the workflow, not the UI complexity:
+
+- Natural-language task entry: let the trader type `分析汇川技术中线还能不能拿`, then infer symbol, horizon, and analysis priority.
+- Multi-agent collaboration: keep the analyst, bull/bear, trader, risk, and portfolio-manager chain visible as a decision process.
+- Scheduled watchlist review: core A-share names should support daily or weekly re-analysis with clear success/failure status.
+- Holding tracker: cost, position weight, P/L, latest report date, and active risk should sit beside the research conclusion.
+- Structured report cards: every saved report should expose conclusion, confidence, target price, stop/invalidation level, core risks, and next check.
+- Model readiness: model warmup and API test details belong in `系统能力`, not in the main trading workflow.
+
+## TauricResearch TradingAgents Inspired Capabilities
+
+The upstream TradingAgents project is most useful as a process architecture reference. RunJin should absorb the durable operating ideas:
+
+- Role chain: analyst evidence, bull/bear debate, trader plan, risk debate, and portfolio-manager decision.
+- Fast/deep model split: lightweight extraction can use quick models; final debate and portfolio decisions should use the stronger model.
+- Debate budget: let the user control debate rounds, and require each round to add new evidence instead of repeating prior claims.
+- Decision memory: store action, confidence, price context, invalidation condition, and later review notes for each report.
+- Checkpoint recovery: long analysis should resume from the last completed stage after interruption.
+- Multi-market discipline: keep one research workflow across A-shares, HK, US, and crypto, but never erase market-specific trading rules.
+
+## Vibe-Trading Inspired Capabilities
+
+HKUDS/Vibe-Trading is useful for the trader-facing loop from natural language to analysis, validation, report, and memory:
+
+- Natural-language workflow: a plain trading question should become a structured research task without forcing the user through many fields.
+- Tool-backed research: the system should gather market data, fundamentals, news, comparable history, and prior notes before drafting a view.
+- Backtest before belief: when a thesis implies a repeatable rule, RunJin should run a quick historical check before treating the story as usable.
+- Persistent memory: reports, invalidation points, and later outcomes should feed future analysis instead of disappearing after one session.
+- Shadow account review: real or simulated trades should be compared with prior research cards to identify impulsive entries, loss-adding, early profit taking, concept chasing, and ignored liquidity warnings.
+
+## AI-Trader Inspired Capabilities
+
+HKUDS/AI-Trader points toward social signals, simulated trading, leaderboards, and agent-published trade ideas. RunJin should absorb the discipline layer without turning into an auto-execution product:
+
+- Signal gatekeeping: every AI-generated idea must pass research-card completeness, risk budget, market constraint, anti-thesis, and duplicate-signal checks.
+- Paper execution first: signals should enter simulated execution before any real-money consideration.
+- Lifecycle tracking: record signal publication, simulated fill, holding updates, exit reason, and final performance.
+- Signal quality scoreboard: rank sources by win rate, payoff ratio, drawdown, and stability, not just recent flashy returns.
+- Copy-trading boundary: RunJin should not place real orders or encourage blind following; any real trade remains a user-confirmed external action.
+
+## QuantDinger Inspired Capabilities
+
+QuantDinger is useful as a reference for an AI-native quantitative trading operating system. RunJin should absorb its research-to-simulation discipline and safety model:
+
+- Strategy OS flow: AI research, strategy development, backtest verification, paper execution, and risk monitoring should be connected as one lifecycle.
+- Code contract: AI-generated strategies must expose entry, exit, invalidation, sizing, and exception handling before they can be tested.
+- Reproducible backtests: every backtest should preserve parameters, data window, trades, curve, drawdown, and warnings.
+- Paper-first execution: generated strategies and signals default to simulated execution; live trading is not a default capability.
+- Permission safety: model agents should have scoped permissions, with read/backtest/paper permissions separated from any future live trading permission.
+- Audit trail: model suggestions, strategy edits, backtest runs, paper fills, and risk overrides should be logged for later review.
