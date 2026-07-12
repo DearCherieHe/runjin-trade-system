@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Optional
+from html import escape
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -183,12 +184,28 @@ RUNJIN_CSS = """
 
 [data-testid="stSidebar"] [role="radiogroup"] label {
   border-radius: 6px;
-  padding: 6px 8px;
-  margin: 2px 0;
+  padding: 9px 10px;
+  margin: 4px 0;
+  border: 1px solid transparent;
+  transition: background .15s ease, border-color .15s ease;
 }
 
 [data-testid="stSidebar"] [role="radiogroup"] label:hover {
   background: rgba(255,255,255,0.05);
+}
+
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
+  background: rgba(46,209,124,0.13);
+  border-color: rgba(46,209,124,0.35);
+}
+
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) * {
+  color: #55e49b !important;
+}
+
+[data-testid="stSidebar"] [role="radiogroup"] [data-testid="stWidgetLabel"],
+[data-testid="stSidebar"] [role="radiogroup"] input {
+  display: none;
 }
 
 h1, h2, h3 {
@@ -492,9 +509,10 @@ code {
 
 [data-testid="stCaptionContainer"] {
   color: var(--rj-dim);
-  font-family: var(--rj-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-family: var(--rj-sans);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 700;
 }
 
 .stTabs [data-baseweb="tab-list"] {
@@ -583,19 +601,17 @@ def render_research_checklist(title: str, items, glue: Optional[str] = None):
 
 
 def render_kpi_grid(items):
-    cards = []
-    for item in items:
-        note = f'<div class="runjin-kpi-note">{item.get("note", "")}</div>' if item.get("note") else '<div class="runjin-kpi-note">&nbsp;</div>'
-        cards.append(
-            f"""
-            <div class="runjin-kpi-card">
-              <div class="runjin-kpi-label">{item["label"]}</div>
-              <div class="runjin-kpi-value">{item["value"]}</div>
-              {note}
-            </div>
-            """
+    cols = st.columns(len(items))
+    for col, item in zip(cols, items):
+        note = escape(str(item.get("note", ""))) or "&nbsp;"
+        col.markdown(
+            '<div class="runjin-kpi-card">'
+            f'<div class="runjin-kpi-label">{escape(str(item["label"]))}</div>'
+            f'<div class="runjin-kpi-value">{escape(str(item["value"]))}</div>'
+            f'<div class="runjin-kpi-note">{note}</div>'
+            "</div>",
+            unsafe_allow_html=True,
         )
-    st.markdown('<div class="runjin-kpi-grid">' + "".join(cards) + "</div>", unsafe_allow_html=True)
 
 
 @st.cache_data
@@ -925,7 +941,7 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
         "RunJin / Manifested Discipline",
         "润金交易系统",
         "A dark research cockpit for long-term compounding and short-term paper-trading discipline. The interface is designed as a daily operating room: narrative, risk, signal, and review stay visible without turning into noise.",
-        ["金水相生", "Live data mode", "No leverage", "No real orders"],
+        ["金水相生", "实时数据", "不加杠杆", "不实盘下单"],
     )
     nvda = prices.loc[prices["ticker"] == "NVDA"]
     stock_bt, stock_metrics, _, stock_status, stock_reason = run_us_stock_paper(nvda, risk_rules)
@@ -968,7 +984,6 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
     fig.update_layout(title="模拟账户曲线", yaxis_title="USD")
     style_figure(fig, 340, time_axis=True)
 
-    st.markdown('<div class="runjin-work-grid">', unsafe_allow_html=True)
     left_col, right_col = st.columns([1.45, 0.8])
     with left_col:
         section_label("账户曲线")
@@ -978,48 +993,31 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
     with right_col:
         section_label("今日处理")
         top_rows = scored.head(3)
-        items_html = []
+        st.markdown('<div class="runjin-list-title">优先股票</div>', unsafe_allow_html=True)
         for row in top_rows.itertuples():
-            items_html.append(
-                f"""
-                <div class="runjin-list-item">
-                  <div class="runjin-list-title">{row.ticker} · {row.company}</div>
-                  <div class="runjin-list-meta">{row.score_label} / {row.bucket}</div>
-                </div>
-                """
+            st.markdown(
+                '<div class="runjin-list-item">'
+                f'<div class="runjin-list-title">{escape(str(row.ticker))} · {escape(str(row.company))}</div>'
+                f'<div class="runjin-list-meta">{escape(str(row.score_label))} / {escape(str(row.bucket))}</div>'
+                "</div>",
+                unsafe_allow_html=True,
             )
-        risk_html = ""
+        st.markdown('<div style="height:14px"></div><div class="runjin-list-title">风险提醒</div>', unsafe_allow_html=True)
         if alerts:
-            risk_html = "".join(
-                f"""
-                <div class="runjin-list-item">
-                  <div class="runjin-list-title">{alert['system']} · {alert['status']}</div>
-                  <div class="runjin-list-meta">{alert['reason']}</div>
-                </div>
-                """
-                for alert in alerts
-            )
+            for alert in alerts:
+                st.markdown(
+                '<div class="runjin-list-item">'
+                f'<div class="runjin-list-title">{escape(str(alert["system"]))} · {escape(str(alert["status"]))}</div>'
+                f'<div class="runjin-list-meta">{escape(str(alert["reason"]))}</div>'
+                "</div>",
+                    unsafe_allow_html=True,
+                )
         else:
-            risk_html = """
-            <div class="runjin-list-item">
-              <div class="runjin-list-title">风险正常</div>
-              <div class="runjin-list-meta">当前模拟盘没有触发暂停条件</div>
-            </div>
-            """
-        st.markdown(
-            f"""
-            <div class="runjin-panel">
-              <div class="runjin-list-title">优先股票</div>
-              <div class="runjin-list">{''.join(items_html)}</div>
-              <div style="height:14px"></div>
-              <div class="runjin-list-title">风险提醒</div>
-              <div class="runjin-list">{risk_html}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
-
+            st.markdown(
+                '<div class="runjin-list-item"><div class="runjin-list-title">风险正常</div>'
+                '<div class="runjin-list-meta">当前模拟盘没有触发暂停条件</div></div>',
+                unsafe_allow_html=True,
+            )
     high_priority = finance_research.loc[finance_research["importance"] >= 4].head(4)
     if not high_priority.empty:
         with st.expander("高优先级研究输入", expanded=False):
