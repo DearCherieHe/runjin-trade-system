@@ -1,10 +1,45 @@
 import json
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "qwen2.5:7b"
+ROOT = Path(__file__).resolve().parents[2]
+CONFIG_PATH = ROOT / "configs" / "ollama.yaml"
+
+
+def load_ollama_config():
+    config = {"base_url": DEFAULT_OLLAMA_URL, "default_model": DEFAULT_OLLAMA_MODEL}
+    if not CONFIG_PATH.exists():
+        return config
+    try:
+        import yaml
+
+        loaded = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    except Exception:
+        loaded = {}
+    config.update({key: value for key, value in loaded.items() if value})
+    return config
+
+
+def save_ollama_config(base_url, default_model):
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "base_url": base_url.rstrip("/"),
+        "default_model": default_model.strip(),
+    }
+    try:
+        import yaml
+
+        CONFIG_PATH.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    except Exception:
+        CONFIG_PATH.write_text(
+            f"base_url: {payload['base_url']}\ndefault_model: {payload['default_model']}\n",
+            encoding="utf-8",
+        )
+    return CONFIG_PATH
 
 
 def _request_json(url, payload=None, timeout=60):

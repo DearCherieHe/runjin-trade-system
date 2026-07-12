@@ -114,7 +114,14 @@ from src.long_term.thesis import (
     get_ticker_profile,
     latest_financial_snapshot,
 )
-from src.long_term.ollama_assistant import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL, ask_ollama, ollama_status
+from src.long_term.ollama_assistant import (
+    DEFAULT_OLLAMA_MODEL,
+    DEFAULT_OLLAMA_URL,
+    ask_ollama,
+    load_ollama_config,
+    ollama_status,
+    save_ollama_config,
+)
 from src.quant_bot.paper_trader import run_crypto_paper, run_us_stock_paper
 from src.reports.exporter import export_markdown_report, report_export_capabilities
 from src.reports.weekly_report import build_weekly_report
@@ -162,7 +169,7 @@ RUNJIN_CSS = """
 
 .block-container {
   max-width: 1480px;
-  padding: 1.4rem 2rem 3.2rem;
+  padding: 2rem 2rem 3.2rem;
 }
 
 [data-testid="stSidebar"] {
@@ -214,11 +221,11 @@ code {
 .runjin-hero {
   border: 0;
   background: transparent;
-  padding: 0 0 12px;
+  padding: 8px 0 12px;
   margin: 0 0 16px;
   box-shadow: none;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .runjin-hero::after {
@@ -233,6 +240,7 @@ code {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: 40px;
 }
 
 .runjin-title-row::before {
@@ -247,7 +255,7 @@ code {
 
 .runjin-title {
   font-size: 30px;
-  line-height: 1.15;
+  line-height: 1.25;
   font-weight: 820;
   color: var(--rj-text);
   letter-spacing: 0;
@@ -348,6 +356,11 @@ code {
   border-radius: 8px;
   padding: 15px 15px 14px;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  min-height: 112px;
+  height: 112px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 [data-testid="stMetricLabel"] {
@@ -362,10 +375,21 @@ code {
   color: var(--rj-text);
   font-family: var(--rj-mono);
   font-size: 24px;
+  line-height: 1.15;
 }
 
 [data-testid="stMetricDelta"] {
   color: var(--rj-green);
+  min-height: 24px;
+  margin-top: 8px;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+[data-testid="stMetric"] [data-testid="stMetricDelta"] svg {
+  flex: 0 0 auto;
 }
 
 [data-testid="stDataFrame"] {
@@ -1609,21 +1633,28 @@ def page_ollama_research_assistant(scored, financials):
         "Ask a local Ollama model to pressure-test the current thesis, invalidation points, and next research checks.",
         ["本地模型", "投研问答", "不下单"],
     )
-    status = ollama_status()
+    ollama_config = load_ollama_config()
+    base_url = ollama_config["base_url"]
+    default_model = ollama_config["default_model"]
+    status = ollama_status(base_url=base_url)
     status_label = "已连接" if status["available"] else "未连接"
     col1, col2, col3 = st.columns(3)
     col1.metric("Ollama", status_label)
-    col2.metric("默认模型", DEFAULT_OLLAMA_MODEL)
-    col3.metric("本地地址", DEFAULT_OLLAMA_URL.replace("http://", ""))
+    col2.metric("默认模型", default_model)
+    col3.metric("本地地址", base_url.replace("http://", ""))
 
     if not status["available"]:
-        st.warning("Ollama 还没有连上。请先在本机启动 Ollama，并确认模型已拉取，例如 `ollama pull qwen2.5:7b`。")
+        st.warning("Ollama 还没有连上。请到 `系统能力 -> 模型能力` 设置地址和模型，然后测试连接。")
+        st.markdown(
+            f'<div class="runjin-note">当前配置：<strong>{base_url}</strong> / <strong>{default_model}</strong></div>',
+            unsafe_allow_html=True,
+        )
         with st.expander("错误信息", expanded=False):
             st.code(status["message"])
         return
 
-    models = status["models"] or [DEFAULT_OLLAMA_MODEL]
-    default_index = models.index(DEFAULT_OLLAMA_MODEL) if DEFAULT_OLLAMA_MODEL in models else 0
+    models = status["models"] or [default_model]
+    default_index = models.index(default_model) if default_model in models else 0
     model = st.selectbox("模型", models, index=default_index)
     ticker = st.selectbox("股票", scored["ticker"].tolist(), key="ollama_ticker")
     profile = scored.loc[scored["ticker"] == ticker].iloc[0]
@@ -1647,7 +1678,7 @@ def page_ollama_research_assistant(scored, financials):
         with st.spinner("本地模型思考中..."):
             prompt = build_ollama_research_prompt(ticker, profile, ticker_financials, question)
             try:
-                answer = ask_ollama(prompt, model=model)
+                answer = ask_ollama(prompt, model=model, base_url=base_url)
             except Exception as exc:
                 st.error(f"Ollama 调用失败：{exc}")
                 return
@@ -1723,6 +1754,31 @@ def page_system_capabilities(source_status):
     )
     tabs = st.tabs(["模型能力", "缓存管理", "数据源状态", "导出能力"])
     with tabs[0]:
+        section_label("Ollama Settings")
+        ollama_config = load_ollama_config()
+        with st.form("ollama_settings_form"):
+            base_url = st.text_input("Ollama 地址", value=ollama_config["base_url"], help="通常是 http://localhost:11434")
+            default_model = st.text_input("默认模型", value=ollama_config["default_model"], help="例如 qwen2.5:7b")
+            save_clicked = st.form_submit_button("保存设置")
+        if save_clicked:
+            path = save_ollama_config(base_url, default_model)
+            st.success(f"已保存：{path}")
+
+        test_config = load_ollama_config()
+        if st.button("测试 Ollama 连接", key="test_ollama_connection"):
+            status = ollama_status(base_url=test_config["base_url"])
+            if status["available"]:
+                st.success("Ollama 已连接")
+                named_table("Installed Ollama models", pd.DataFrame([{"model": model} for model in status["models"]]))
+            else:
+                st.error("Ollama 未连接")
+                st.code(status["message"])
+        st.markdown(
+            f'<div class="runjin-note">如果本机没有模型，先在终端执行：<strong>ollama pull {test_config["default_model"]}</strong></div>',
+            unsafe_allow_html=True,
+        )
+
+        section_label("Provider Catalog")
         named_table("LLM providers", pd.DataFrame(provider_table()))
         named_table("Task model policy", pd.DataFrame(task_policy_table()))
     with tabs[1]:
