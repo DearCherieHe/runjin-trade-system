@@ -350,6 +350,99 @@ code {
   color: var(--rj-green);
 }
 
+.runjin-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+  margin: 8px 0 20px;
+}
+
+.runjin-kpi-card {
+  height: 116px;
+  border: 1px solid var(--rj-line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #171918, #101211);
+  padding: 18px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  overflow: hidden;
+}
+
+.runjin-kpi-label {
+  color: var(--rj-muted);
+  font-family: var(--rj-mono);
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.runjin-kpi-value {
+  color: var(--rj-text);
+  font-family: var(--rj-mono);
+  font-size: 28px;
+  font-weight: 780;
+  line-height: 1.15;
+  margin-top: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.runjin-kpi-note {
+  color: #9eb8a4;
+  font-family: var(--rj-sans);
+  font-size: 13px;
+  line-height: 1.2;
+  margin-top: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.runjin-work-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.runjin-panel {
+  border: 1px solid var(--rj-line);
+  border-radius: 8px;
+  background: var(--rj-panel);
+  padding: 16px;
+}
+
+.runjin-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.runjin-list-item {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.025);
+  padding: 11px 12px;
+}
+
+.runjin-list-title {
+  color: var(--rj-text);
+  font-weight: 740;
+  margin-bottom: 4px;
+}
+
+.runjin-list-meta {
+  color: var(--rj-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 [data-testid="stMetric"] {
   background: linear-gradient(180deg, #171918, #101211);
   border: 1px solid var(--rj-line);
@@ -450,6 +543,7 @@ hr {
 @media (max-width: 800px) {
   .block-container { padding: 1.4rem 1rem 2.4rem; }
   .runjin-title { font-size: 25px; }
+  .runjin-kpi-grid, .runjin-work-grid { grid-template-columns: 1fr; }
 }
 </style>
 """
@@ -486,6 +580,22 @@ def render_research_checklist(title: str, items, glue: Optional[str] = None):
     else:
         body = "<ul>" + "".join(f"<li>{item}</li>" for item in items) + "</ul>"
     st.markdown(f'<div class="runjin-thesis"><h4>{title}</h4>{body}</div>', unsafe_allow_html=True)
+
+
+def render_kpi_grid(items):
+    cards = []
+    for item in items:
+        note = f'<div class="runjin-kpi-note">{item.get("note", "")}</div>' if item.get("note") else '<div class="runjin-kpi-note">&nbsp;</div>'
+        cards.append(
+            f"""
+            <div class="runjin-kpi-card">
+              <div class="runjin-kpi-label">{item["label"]}</div>
+              <div class="runjin-kpi-value">{item["value"]}</div>
+              {note}
+            </div>
+            """
+        )
+    st.markdown('<div class="runjin-kpi-grid">' + "".join(cards) + "</div>", unsafe_allow_html=True)
 
 
 @st.cache_data
@@ -577,7 +687,7 @@ def coerce_datetime_key(df, column="date"):
 
 
 def named_table(name, df):
-    st.caption(f"TABLE / {name}")
+    st.caption(name)
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
@@ -788,23 +898,23 @@ def build_ticker_kline(prices, ticker, timeframe, as_of=None, data_mode="sample"
 
 def kline_controls(prices, ticker, key_prefix, data_mode):
     timeframe = st.selectbox(
-        "K-line timeframe",
+        "K线周期",
         ["1H", "1D", "1W", "1M", "1Q", "1Y"],
         index=1,
         key=f"{key_prefix}_timeframe",
-        help="Hourly uses live on-demand data when available. Weekly/monthly/quarterly/yearly are OHLCV resamples from historical daily bars.",
+        help="小时线优先使用实时数据；周/月/季/年线由日线重采样。",
     )
     ticker_prices = prices.loc[prices["ticker"] == ticker].copy()
     ticker_prices["date"] = pd.to_datetime(ticker_prices["date"], errors="coerce")
     min_date = ticker_prices["date"].min().date()
     max_date = ticker_prices["date"].max().date()
     as_of = st.date_input(
-        "Replay as of",
+        "回放到",
         value=max_date,
         min_value=min_date,
         max_value=max_date,
         key=f"{key_prefix}_asof",
-        help="Use this date as the current moment. The chart only shows bars available up to that date.",
+        help="把这一天当作当前时点，只显示当时已经出现的数据。",
     )
     show_forecast = forecast_controls(key_prefix)
     return timeframe, as_of, show_forecast
@@ -828,13 +938,20 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
         crypto_status = "PAUSE"
         crypto_reason = "Crypto live source unavailable"
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Market universe", fmt_int(len(market_universe)))
-    col2.metric("Deep research", fmt_int((scored["bucket"] == "Deep research candidate").sum()))
-    col3.metric("US paper bot", stock_status, stock_reason)
-    col4.metric("Crypto paper bot", crypto_status, crypto_reason)
+    alerts = []
+    for name, status, reason in [("US stock bot", stock_status, stock_reason), ("Crypto bot", crypto_status, crypto_reason)]:
+        if status != "CONTINUE":
+            alerts.append({"system": name, "status": status, "reason": reason})
 
-    section_label("Portfolio Simulation")
+    render_kpi_grid(
+        [
+            {"label": "股票池", "value": fmt_int(len(market_universe)), "note": "可研究标的"},
+            {"label": "深度研究", "value": fmt_int((scored["bucket"] == "Deep research candidate").sum()), "note": "高优先级候选"},
+            {"label": "美股模拟", "value": stock_status, "note": stock_reason},
+            {"label": "加密模拟", "value": crypto_status, "note": crypto_reason},
+        ]
+    )
+
     equity = pd.DataFrame(
         {
             "date": stock_bt["date"],
@@ -848,24 +965,65 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
         crypto_equity = crypto_bt[["datetime", "equity"]].rename(columns={"datetime": "date", "equity": "Crypto bot"})
         crypto_equity = coerce_datetime_key(crypto_equity, "date")
         fig.add_trace(go.Scatter(x=crypto_equity["date"], y=crypto_equity["Crypto bot"], name="Crypto bot", line=dict(color="#d8cb5f")))
-    fig.update_layout(title="Paper Equity Curves", yaxis_title="USD")
-    style_figure(fig, 360, time_axis=True)
-    st.plotly_chart(fig, use_container_width=True)
+    fig.update_layout(title="模拟账户曲线", yaxis_title="USD")
+    style_figure(fig, 340, time_axis=True)
 
-    alerts = []
-    for name, status, reason in [("US stock bot", stock_status, stock_reason), ("Crypto bot", crypto_status, crypto_reason)]:
-        if status != "CONTINUE":
-            alerts.append({"system": name, "status": status, "reason": reason})
-    if alerts:
-        named_table("Risk alerts", pd.DataFrame(alerts))
-    else:
-        st.markdown('<div class="runjin-note">Risk desk clear: no stop condition is triggered in the current live-data simulation.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="runjin-work-grid">', unsafe_allow_html=True)
+    left_col, right_col = st.columns([1.45, 0.8])
+    with left_col:
+        section_label("账户曲线")
+        st.plotly_chart(fig, use_container_width=True)
+        candidate_view = scored[["ticker", "company", "score_label", "bucket", "growth_evidence"]].head(6).copy()
+        named_table("今日优先观察", candidate_view)
+    with right_col:
+        section_label("今日处理")
+        top_rows = scored.head(3)
+        items_html = []
+        for row in top_rows.itertuples():
+            items_html.append(
+                f"""
+                <div class="runjin-list-item">
+                  <div class="runjin-list-title">{row.ticker} · {row.company}</div>
+                  <div class="runjin-list-meta">{row.score_label} / {row.bucket}</div>
+                </div>
+                """
+            )
+        risk_html = ""
+        if alerts:
+            risk_html = "".join(
+                f"""
+                <div class="runjin-list-item">
+                  <div class="runjin-list-title">{alert['system']} · {alert['status']}</div>
+                  <div class="runjin-list-meta">{alert['reason']}</div>
+                </div>
+                """
+                for alert in alerts
+            )
+        else:
+            risk_html = """
+            <div class="runjin-list-item">
+              <div class="runjin-list-title">风险正常</div>
+              <div class="runjin-list-meta">当前模拟盘没有触发暂停条件</div>
+            </div>
+            """
+        st.markdown(
+            f"""
+            <div class="runjin-panel">
+              <div class="runjin-list-title">优先股票</div>
+              <div class="runjin-list">{''.join(items_html)}</div>
+              <div style="height:14px"></div>
+              <div class="runjin-list-title">风险提醒</div>
+              <div class="runjin-list">{risk_html}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    high_priority = finance_research.loc[finance_research["importance"] >= 4].head(6)
+    high_priority = finance_research.loc[finance_research["importance"] >= 4].head(4)
     if not high_priority.empty:
-        named_table("FinanceMCP high-priority research inputs", high_priority)
-
-    named_table("Top long-term candidates", scored[["ticker", "company", "tags", "score_label", "bucket", "growth_evidence"]].head(8))
+        with st.expander("高优先级研究输入", expanded=False):
+            named_table("Research inputs", high_priority)
     render_data_source_debug(source_status)
 
 
