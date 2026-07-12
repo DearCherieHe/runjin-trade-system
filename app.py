@@ -648,6 +648,46 @@ def fmt_number(value, digits=1, suffix=""):
         return "N/A"
 
 
+def status_cn(status):
+    return {
+        "CONTINUE": "运行中",
+        "PAUSE": "暂停",
+        "STOP": "停止",
+        "REVIEW": "复核",
+        "PASS": "通过",
+        "FAIL": "失败",
+        "success": "成功",
+        "failed": "失败",
+    }.get(str(status), str(status))
+
+
+def bucket_cn(bucket):
+    return {
+        "Deep research candidate": "深度研究",
+        "Observation pool": "观察池",
+        "Low priority": "低优先级",
+    }.get(str(bucket), str(bucket))
+
+
+def watchlist_display(df):
+    view = df.copy()
+    if "bucket" in view:
+        view["bucket"] = view["bucket"].map(bucket_cn)
+    rename_map = {
+        "ticker": "代码",
+        "company": "公司",
+        "tags": "标签",
+        "score_label": "评分",
+        "bucket": "层级",
+        "narrative": "长期逻辑",
+        "growth_evidence": "验证证据",
+        "invalidation": "失效条件",
+        "catalysts": "催化剂",
+        "buy_plan": "计划",
+    }
+    return view.rename(columns={key: value for key, value in rename_map.items() if key in view.columns})
+
+
 def build_ollama_research_prompt(ticker, profile, ticker_financials, user_question):
     latest = latest_financial_snapshot(ticker_financials)
     if latest:
@@ -873,10 +913,10 @@ def plot_kline(df, title, forecast=None, signal_markers=None):
 
 def forecast_controls(key_prefix):
     return st.checkbox(
-        "Show research forecast",
+        "显示研究预测",
         value=False,
         key=f"{key_prefix}_show_forecast",
-        help="Off by default. Local sample forecasts are disabled in live-data mode.",
+        help="默认关闭；只作为研究参考，不作为交易信号。",
     )
 
 
@@ -913,7 +953,8 @@ def build_ticker_kline(prices, ticker, timeframe, as_of=None, data_mode="sample"
 
 
 def kline_controls(prices, ticker, key_prefix, data_mode):
-    timeframe = st.selectbox(
+    control_cols = st.columns([1, 1, 1])
+    timeframe = control_cols[0].selectbox(
         "K线周期",
         ["1H", "1D", "1W", "1M", "1Q", "1Y"],
         index=1,
@@ -924,7 +965,7 @@ def kline_controls(prices, ticker, key_prefix, data_mode):
     ticker_prices["date"] = pd.to_datetime(ticker_prices["date"], errors="coerce")
     min_date = ticker_prices["date"].min().date()
     max_date = ticker_prices["date"].max().date()
-    as_of = st.date_input(
+    as_of = control_cols[1].date_input(
         "回放到",
         value=max_date,
         min_value=min_date,
@@ -932,7 +973,8 @@ def kline_controls(prices, ticker, key_prefix, data_mode):
         key=f"{key_prefix}_asof",
         help="把这一天当作当前时点，只显示当时已经出现的数据。",
     )
-    show_forecast = forecast_controls(key_prefix)
+    with control_cols[2]:
+        show_forecast = forecast_controls(key_prefix)
     return timeframe, as_of, show_forecast
 
 
@@ -963,8 +1005,8 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
         [
             {"label": "股票池", "value": fmt_int(len(market_universe)), "note": "可研究标的"},
             {"label": "深度研究", "value": fmt_int((scored["bucket"] == "Deep research candidate").sum()), "note": "高优先级候选"},
-            {"label": "美股模拟", "value": stock_status, "note": stock_reason},
-            {"label": "加密模拟", "value": crypto_status, "note": crypto_reason},
+            {"label": "美股模拟", "value": status_cn(stock_status), "note": stock_reason},
+            {"label": "加密模拟", "value": status_cn(crypto_status), "note": crypto_reason},
         ]
     )
 
@@ -975,20 +1017,21 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
         }
     )
     equity = coerce_datetime_key(equity, "date")
+    chart_equity = equity.tail(1260)
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=equity["date"], y=equity["US stock bot"], name="US stock bot", line=dict(color="#2ed17c")))
+    fig.add_trace(go.Scatter(x=chart_equity["date"], y=chart_equity["US stock bot"], name="US stock bot", line=dict(color="#2ed17c")))
     if not crypto_bt.empty:
         crypto_equity = crypto_bt[["datetime", "equity"]].rename(columns={"datetime": "date", "equity": "Crypto bot"})
         crypto_equity = coerce_datetime_key(crypto_equity, "date")
-        fig.add_trace(go.Scatter(x=crypto_equity["date"], y=crypto_equity["Crypto bot"], name="Crypto bot", line=dict(color="#d8cb5f")))
-    fig.update_layout(title="模拟账户曲线", yaxis_title="USD")
+        fig.add_trace(go.Scatter(x=crypto_equity.tail(1260)["date"], y=crypto_equity.tail(1260)["Crypto bot"], name="Crypto bot", line=dict(color="#d8cb5f")))
+    fig.update_layout(title="模拟账户曲线（近5年）", yaxis_title="USD")
     style_figure(fig, 340, time_axis=True)
 
     left_col, right_col = st.columns([1.45, 0.8])
     with left_col:
         section_label("账户曲线")
         st.plotly_chart(fig, use_container_width=True)
-        candidate_view = scored[["ticker", "company", "score_label", "bucket", "growth_evidence"]].head(6).copy()
+        candidate_view = watchlist_display(scored[["ticker", "company", "score_label", "bucket", "growth_evidence"]].head(6))
         named_table("今日优先观察", candidate_view)
     with right_col:
         section_label("今日处理")
@@ -998,7 +1041,7 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
             st.markdown(
                 '<div class="runjin-list-item">'
                 f'<div class="runjin-list-title">{escape(str(row.ticker))} · {escape(str(row.company))}</div>'
-                f'<div class="runjin-list-meta">{escape(str(row.score_label))} / {escape(str(row.bucket))}</div>'
+                f'<div class="runjin-list-meta">{escape(str(row.score_label))} / {escape(bucket_cn(row.bucket))}</div>'
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -1007,7 +1050,7 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
             for alert in alerts:
                 st.markdown(
                 '<div class="runjin-list-item">'
-                f'<div class="runjin-list-title">{escape(str(alert["system"]))} · {escape(str(alert["status"]))}</div>'
+                f'<div class="runjin-list-title">{escape(str(alert["system"]))} · {escape(status_cn(alert["status"]))}</div>'
                 f'<div class="runjin-list-meta">{escape(str(alert["reason"]))}</div>'
                 "</div>",
                     unsafe_allow_html=True,
@@ -1107,7 +1150,7 @@ def page_watchlist(scored):
     view = scored.loc[scored["bucket"].isin(bucket_filter)].copy()
     named_table(
         "Ranked long-term observation pool",
-        view[
+        watchlist_display(view[
             [
                 "ticker",
                 "company",
@@ -1118,7 +1161,7 @@ def page_watchlist(scored):
                 "growth_evidence",
                 "invalidation",
             ]
-        ],
+        ]),
     )
 
     section_label("Score Breakdown")
@@ -1482,7 +1525,7 @@ def page_kline_lab(prices, forecasts, market_universe, data_mode):
     price_tickers = sorted(prices["ticker"].unique())
     universe_tickers = sorted(market_universe["yahoo_ticker"].dropna().unique()) if not market_universe.empty else []
     tickers = sorted(set(price_tickers) | set(universe_tickers))
-    ticker = st.selectbox("Ticker", tickers, index=tickers.index("NVDA") if "NVDA" in tickers else 0)
+    ticker = st.selectbox("股票", tickers, index=tickers.index("NVDA") if "NVDA" in tickers else 0)
     ticker_has_loaded_prices = ticker in set(price_tickers)
     control_prices = prices
     if not ticker_has_loaded_prices and data_mode in {"live_auto", "live"}:
@@ -1517,30 +1560,37 @@ def page_kline_lab(prices, forecasts, market_universe, data_mode):
     rs = relative_strength(ticker_prices, benchmark) if ticker != "TSM" and not benchmark.empty else pd.DataFrame()
 
     latest_indicator = ticker_prices.dropna().tail(1)
-    kdj_state = "Insufficient data"
+    kdj_state = "数据不足"
     if not latest_indicator.empty:
         latest_row = latest_indicator.iloc[0]
         if latest_row["kdj_j"] > 100:
-            kdj_state = "KDJ extended"
+            kdj_state = "偏高"
         elif latest_row["kdj_j"] < 0:
-            kdj_state = "KDJ washed out"
+            kdj_state = "超卖"
         elif latest_row["kdj_k"] > latest_row["kdj_d"]:
-            kdj_state = "KDJ improving"
+            kdj_state = "转强"
         else:
-            kdj_state = "KDJ cooling"
+            kdj_state = "降温"
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Regime", classify_regime(ticker_prices))
+    regime_label = {
+        "Range or transition": "震荡/转换",
+        "Uptrend": "上升趋势",
+        "Downtrend": "下降趋势",
+        "High volatility": "高波动",
+    }.get(classify_regime(ticker_prices), classify_regime(ticker_prices))
     latest_rsi = ticker_prices["rsi14"].dropna()
     latest_volatility = ticker_prices["volatility_20"].dropna()
-    col2.metric("Latest RSI", f"{latest_rsi.iloc[-1]:.0f}" if not latest_rsi.empty else "N/A")
-    col3.metric("20D volatility", fmt_pct(latest_volatility.iloc[-1]) if not latest_volatility.empty else "N/A")
-    col4.metric("KDJ state", kdj_state)
-
-    st.markdown(
-        f'<div class="runjin-note">K-line coverage: {coverage_summary(ticker_prices)} / {source_note}. Forecast overlay is off by default, research-only, hidden during replay, and filtered for price-scale sanity.</div>',
-        unsafe_allow_html=True,
+    render_kpi_grid(
+        [
+            {"label": "结构", "value": regime_label, "note": "趋势状态"},
+            {"label": "RSI", "value": f"{latest_rsi.iloc[-1]:.0f}" if not latest_rsi.empty else "N/A", "note": "动量温度"},
+            {"label": "20日波动", "value": fmt_pct(latest_volatility.iloc[-1]) if not latest_volatility.empty else "N/A", "note": "风险强度"},
+            {"label": "KDJ", "value": kdj_state, "note": "短线状态"},
+        ]
     )
+
+    with st.expander("数据说明", expanded=False):
+        st.caption(f"{coverage_summary(ticker_prices)} / {source_note}")
     volume_price_context = f"{ticker}|{timeframe}|{as_of}"
     if st.button("Show volume-price state", key="vp_show"):
         st.session_state["volume_price_context"] = volume_price_context
@@ -1800,7 +1850,10 @@ def page_ollama_research_assistant(scored, financials):
     col3.metric("本地地址", base_url.replace("http://", ""))
 
     if not status["available"]:
-        st.warning("Ollama 还没有连上。请到 `系统能力 -> 模型能力` 设置地址和模型，然后测试连接。")
+        if "localhost" in base_url or "127.0.0.1" in base_url:
+            st.warning("当前是线上页面，不能直接访问你电脑里的本地 Ollama。要使用本地模型，请在本机运行本系统，或把 Ollama 地址改成可被线上访问的远程地址。")
+        else:
+            st.warning("Ollama 还没有连上。请到 `系统能力 -> 模型能力` 设置地址和模型，然后测试连接。")
         st.markdown(
             f'<div class="runjin-note">当前配置：<strong>{base_url}</strong> / <strong>{default_model}</strong></div>',
             unsafe_allow_html=True,
@@ -1956,28 +2009,24 @@ def page_backtest_lab(prices, crypto):
         "Backtest Lab / Strategy Proof",
         "策略回测平台",
         "A safer backtesting desk built on backtesting.py: you define a constrained YAML strategy spec, the engine runs on OHLCV bars, and the output shows equity, drawdown, trades, and robustness warnings. V0.1 does not execute arbitrary Python.",
-        ["backtesting.py", "No eval", "No leverage", "Research only"],
-    )
-    st.markdown(
-        '<div class="runjin-note">Input is a controlled YAML strategy spec, not raw Python code. This keeps the platform reproducible and avoids executing unsafe user code inside Streamlit.</div>',
-        unsafe_allow_html=True,
+        ["策略验证", "不加杠杆", "研究用途"],
     )
 
-    asset_class = st.radio("Asset class", ["US stock", "Crypto"], horizontal=True, key="bt_asset_class")
-    if asset_class == "US stock":
-        ticker = st.selectbox("Ticker", sorted(prices["ticker"].unique()), index=0, key="bt_ticker")
+    asset_class = st.radio("资产类型", ["美股", "加密"], horizontal=True, key="bt_asset_class")
+    if asset_class == "美股":
+        ticker = st.selectbox("股票", sorted(prices["ticker"].unique()), index=0, key="bt_ticker")
         raw = prices.loc[prices["ticker"] == ticker].copy()
         time_col = "date"
-        timeframe = st.selectbox("Backtest timeframe", ["1D", "1W", "1M"], index=0, key="bt_stock_timeframe")
+        timeframe = st.selectbox("周期", ["1D", "1W", "1M"], index=0, key="bt_stock_timeframe")
         raw = resample_ohlcv(raw, timeframe, "date")
     else:
         if crypto.empty:
             st.warning("Crypto live data is unavailable. The workspace is fixed to realtime data only, so no sample fallback is shown.")
             return
-        ticker = st.selectbox("Symbol", sorted(crypto["symbol"].unique()), index=0, key="bt_symbol")
+        ticker = st.selectbox("标的", sorted(crypto["symbol"].unique()), index=0, key="bt_symbol")
         raw = crypto.loc[crypto["symbol"] == ticker].copy()
         time_col = "datetime"
-        timeframe = st.selectbox("Backtest timeframe", ["1H", "1D"], index=0, key="bt_crypto_timeframe")
+        timeframe = st.selectbox("周期", ["1H", "1D"], index=0, key="bt_crypto_timeframe")
         if timeframe == "1D":
             raw = resample_ohlcv(raw.rename(columns={"datetime": "date"}), "1D", "date").rename(columns={"date": "datetime"})
 
@@ -1985,28 +2034,30 @@ def page_backtest_lab(prices, crypto):
     min_date = raw[time_col].min().date()
     max_date = raw[time_col].max().date()
     col1, col2, col3 = st.columns([1, 1, 1.2])
-    start_date = col1.date_input("Start", value=min_date, min_value=min_date, max_value=max_date, key="bt_start")
-    end_date = col2.date_input("End", value=max_date, min_value=min_date, max_value=max_date, key="bt_end")
-    example_name = col3.selectbox("Template", list(EXAMPLE_STRATEGY_SPECS.keys()), key="bt_template")
+    default_start = max(min_date, pd.Timestamp(max_date).to_pydatetime().date().replace(year=max_date.year - 5))
+    start_date = col1.date_input("开始", value=default_start, min_value=min_date, max_value=max_date, key="bt_start")
+    end_date = col2.date_input("结束", value=max_date, min_value=min_date, max_value=max_date, key="bt_end")
+    example_name = col3.selectbox("策略模板", list(EXAMPLE_STRATEGY_SPECS.keys()), key="bt_template")
 
-    if st.button("Load template", key="bt_load_template"):
+    if st.button("载入模板", key="bt_load_template"):
         st.session_state["bt_strategy_spec"] = EXAMPLE_STRATEGY_SPECS[example_name]
 
     default_spec = st.session_state.get("bt_strategy_spec", EXAMPLE_STRATEGY_SPECS.get(example_name, DEFAULT_STRATEGY_SPEC))
-    strategy_spec = st.text_area(
-        "Strategy YAML",
-        value=default_spec,
-        height=260,
-        key="bt_strategy_spec",
-        help="Edit parameters safely. Supported templates: sma_crossover, rsi_mean_reversion, bollinger_reversion, macd_trend.",
-    )
+    with st.expander("高级参数 YAML", expanded=False):
+        strategy_spec = st.text_area(
+            "策略 YAML",
+            value=default_spec,
+            height=260,
+            key="bt_strategy_spec",
+            help="安全编辑参数。支持 sma_crossover, rsi_mean_reversion, bollinger_reversion, macd_trend。",
+        )
 
     mask = (raw[time_col].dt.date >= start_date) & (raw[time_col].dt.date <= end_date)
     backtest_data = raw.loc[mask].copy()
-    st.caption(f"Backtest dataset: {ticker} / {timeframe} / {len(backtest_data):,} bars / {start_date} -> {end_date}")
+    st.caption(f"回测数据：{ticker} / {timeframe} / {len(backtest_data):,} 根K线 / {start_date} -> {end_date}")
 
-    if st.button("Run backtest", type="primary", key="bt_run"):
-        with st.spinner("Running backtest with backtesting.py..."):
+    if st.button("运行回测", type="primary", key="bt_run"):
+        with st.spinner("回测中..."):
             try:
                 result = run_strategy_backtest(backtest_data, time_col, strategy_spec)
             except BacktestEngineUnavailable as exc:
@@ -2349,6 +2400,7 @@ def page_long_research_desk(prices, crypto, financials, market_universe, scored,
         "研究模块",
         ["投研小助手", "单股同步", "批量分析", "牛股框架", "股票池", "观察清单", "研究雷达", "研究日志"],
         horizontal=True,
+        index=5,
         key="long_research_layer",
     )
     subpage = {
