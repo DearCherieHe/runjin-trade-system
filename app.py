@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -66,6 +67,9 @@ except ImportError as loaders_import_error:
 
 from src.data_sources.finance_mcp import load_finance_mcp_capabilities, load_finance_mcp_research
 from src.data_sources.market_universe import ensure_market_universe_columns
+from src.data_sources.sync import result_to_frames, sync_single_quote
+from src.core.cache import CacheManager
+from src.core.llm_providers import provider_table, task_policy_table
 from src.ashare_workbench.levels import key_price_levels
 from src.market_workbench.core import (
     STRATEGY_DESCRIPTIONS,
@@ -102,8 +106,17 @@ except ImportError:
         return prices[prices["ticker"].isin(tickers)].copy()
 from src.long_term.scoring import SCORE_COLUMNS, build_score_table
 from src.long_term.industry_map import build_future_profile, future_theme_summary, industry_layer_scores, relationship_comparison
-from src.long_term.thesis import get_ticker_profile, latest_financial_snapshot
+from src.long_term.batch_analysis import analysis_progress_rows, batch_long_analysis
+from src.long_term.thesis import (
+    EXIT_OBSERVATION_CONDITIONS,
+    HOLD_OBSERVATION_CONDITIONS,
+    TENBAGGER_DISCOVERY_FRAMEWORK,
+    get_ticker_profile,
+    latest_financial_snapshot,
+)
+from src.long_term.ollama_assistant import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL, ask_ollama, ollama_status
 from src.quant_bot.paper_trader import run_crypto_paper, run_us_stock_paper
+from src.reports.exporter import export_markdown_report, report_export_capabilities
 from src.reports.weekly_report import build_weekly_report
 from src.trade_skills.capital_rotation import cohort_rotation
 from src.trade_skills.intraday import intraday_signal_pack
@@ -149,7 +162,7 @@ RUNJIN_CSS = """
 
 .block-container {
   max-width: 1480px;
-  padding: 2.1rem 2.4rem 3.5rem;
+  padding: 1.4rem 2rem 3.2rem;
 }
 
 [data-testid="stSidebar"] {
@@ -199,64 +212,59 @@ code {
 }
 
 .runjin-hero {
-  border: 1px solid var(--rj-line);
-  background:
-    linear-gradient(90deg, rgba(46,209,124,0.11), transparent 34%),
-    linear-gradient(180deg, #101211 0%, #090b0a 100%);
-  padding: 24px 28px 22px;
-  margin: 0 0 20px;
-  box-shadow: 0 18px 60px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.035);
+  border: 0;
+  background: transparent;
+  padding: 0 0 12px;
+  margin: 0 0 16px;
+  box-shadow: none;
   position: relative;
   overflow: hidden;
 }
 
 .runjin-hero::after {
-  content: "";
-  position: absolute;
-  right: 26px;
-  top: 24px;
-  width: 140px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(46,209,124,0.55), transparent);
+  content: none;
 }
 
 .runjin-kicker {
+  display: none;
+}
+
+.runjin-title-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  color: var(--rj-green);
-  font-family: var(--rj-mono);
-  font-size: 11px;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-  margin-bottom: 10px;
-  opacity: 0.92;
 }
 
-.runjin-kicker::before {
+.runjin-title-row::before {
   content: "";
-  display: inline-block;
-  width: 32px;
-  height: 2px;
-  background: var(--rj-green);
+  width: 5px;
+  height: 28px;
+  border-radius: 99px;
+  background: linear-gradient(180deg, #54f3df, var(--rj-green));
+  box-shadow: 0 0 16px rgba(46,209,124,0.35);
+  flex: 0 0 auto;
 }
 
 .runjin-title {
-  font-size: clamp(2.2rem, 4.4vw, 4.9rem);
-  line-height: 0.98;
+  font-size: 30px;
+  line-height: 1.15;
   font-weight: 820;
   color: var(--rj-text);
-  letter-spacing: -0.012em;
-  text-wrap: pretty;
+  letter-spacing: 0;
   max-width: 980px;
 }
 
 .runjin-subtitle {
-  max-width: 1080px;
-  margin-top: 14px;
-  color: #aeb6ae;
+  display: none;
+}
+
+.runjin-page-note {
+  max-width: 1040px;
+  margin: 8px 0 0 17px;
+  color: #818981;
+  font-family: var(--rj-mono);
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 1.45;
   text-wrap: pretty;
 }
 
@@ -264,12 +272,12 @@ code {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 16px;
+  margin: 12px 0 0 17px;
 }
 
 .runjin-ribbon span {
   border: 1px solid var(--rj-line);
-  background: rgba(255,255,255,0.025);
+  background: rgba(255,255,255,0.035);
   color: #a5ada5;
   font-family: var(--rj-mono);
   font-size: 10.5px;
@@ -303,6 +311,7 @@ code {
   background: var(--rj-panel);
   padding: 18px;
   min-height: 170px;
+  border-radius: 8px;
 }
 
 .runjin-thesis h4 {
@@ -336,7 +345,7 @@ code {
 [data-testid="stMetric"] {
   background: linear-gradient(180deg, #171918, #101211);
   border: 1px solid var(--rj-line);
-  border-radius: 0;
+  border-radius: 8px;
   padding: 15px 15px 14px;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
 }
@@ -411,12 +420,12 @@ hr {
 .js-plotly-plot {
   border: 1px solid var(--rj-line);
   background: var(--rj-panel);
+  border-radius: 8px;
 }
 
 @media (max-width: 800px) {
   .block-container { padding: 1.4rem 1rem 2.4rem; }
-  .runjin-hero { padding: 18px; }
-  .runjin-title { font-size: 2.55rem; }
+  .runjin-title { font-size: 25px; }
 }
 </style>
 """
@@ -434,7 +443,7 @@ def page_header(kicker: str, title: str, subtitle: str, ribbons=None):
         f"""
         <div class="runjin-hero">
           <div class="runjin-kicker">{kicker}</div>
-          <div class="runjin-title">{title}</div>
+          <div class="runjin-title-row"><div class="runjin-title">{title}</div></div>
           <div class="runjin-subtitle">{subtitle}</div>
           {ribbon_html}
         </div>
@@ -445,6 +454,14 @@ def page_header(kicker: str, title: str, subtitle: str, ribbons=None):
 
 def section_label(text: str):
     st.markdown(f'<div class="runjin-section">{text}</div>', unsafe_allow_html=True)
+
+
+def render_research_checklist(title: str, items, glue: Optional[str] = None):
+    if glue:
+        body = f"<p>{glue.join(items)}</p>"
+    else:
+        body = "<ul>" + "".join(f"<li>{item}</li>" for item in items) + "</ul>"
+    st.markdown(f'<div class="runjin-thesis"><h4>{title}</h4>{body}</div>', unsafe_allow_html=True)
 
 
 @st.cache_data
@@ -481,6 +498,51 @@ def fmt_number(value, digits=1, suffix=""):
         return "N/A"
 
 
+def build_ollama_research_prompt(ticker, profile, ticker_financials, user_question):
+    latest = latest_financial_snapshot(ticker_financials)
+    if latest:
+        financial_context = (
+            f"最新财务: 营收同比 {fmt_pct(latest['revenue_growth_yoy'])}, "
+            f"毛利率 {fmt_pct(latest['gross_margin'])}, "
+            f"经营现金流率 {fmt_pct(latest['operating_cash_flow_margin'])}, "
+            f"净利率 {fmt_pct(latest['net_income_margin'])}, "
+            f"营收增速变化 {fmt_pct(latest['revenue_growth_delta'])}."
+        )
+    else:
+        financial_context = "暂无财务序列。"
+
+    return f"""
+你是润金交易系统里的本地投研小助手。请用中文回答，风格要短、清楚、可执行。
+边界：只做投研分析和问题拆解，不给确定性买卖指令，不承诺收益。
+
+当前股票：{ticker} / {profile['company']}
+叙事：{profile['narrative']}
+成长证据：{profile['growth_evidence']}
+催化剂：{profile['catalysts']}
+失效条件：{profile['invalidation']}
+买入计划：{profile['buy_plan']}
+评分：{profile['score_label']} / 分层：{profile['bucket']}
+{financial_context}
+
+继续跟踪/持有条件：
+{chr(10).join('- ' + item for item in HOLD_OBSERVATION_CONDITIONS)}
+
+放弃条件：
+{chr(10).join('- ' + item for item in EXIT_OBSERVATION_CONDITIONS)}
+
+识别牛股框架：
+{" + ".join(TENBAGGER_DISCOVERY_FRAMEWORK)}
+
+用户问题：{user_question}
+
+请按这个格式输出：
+1. 核心判断：一句话。
+2. 证据：3条以内。
+3. 风险/失效点：3条以内。
+4. 下一步要核实什么：3条以内。
+""".strip()
+
+
 def coerce_datetime_key(df, column="date"):
     normalized = df.copy()
     normalized[column] = pd.to_datetime(normalized[column], errors="coerce")
@@ -493,6 +555,17 @@ def coerce_datetime_key(df, column="date"):
 def named_table(name, df):
     st.caption(f"TABLE / {name}")
     st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def render_data_source_debug(source_status):
+    status_df = pd.DataFrame(
+        [
+            {"layer": key, **value}
+            for key, value in source_status.items()
+        ]
+    )
+    with st.expander("Debug / data plumbing", expanded=False):
+        named_table("Data source status", status_df)
 
 
 def metric_row(label, value, help_text=None):
@@ -709,7 +782,6 @@ def kline_controls(prices, ticker, key_prefix, data_mode):
         key=f"{key_prefix}_asof",
         help="Use this date as the current moment. The chart only shows bars available up to that date.",
     )
-    st.caption(f"Replay range: {min_date} -> {max_date} / data mode: {data_mode}")
     show_forecast = forecast_controls(key_prefix)
     return timeframe, as_of, show_forecast
 
@@ -721,14 +793,6 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
         "A dark research cockpit for long-term compounding and short-term paper-trading discipline. The interface is designed as a daily operating room: narrative, risk, signal, and review stay visible without turning into noise.",
         ["金水相生", "Live data mode", "No leverage", "No real orders"],
     )
-    status_df = pd.DataFrame(
-        [
-            {"layer": key, **value}
-            for key, value in source_status.items()
-        ]
-    )
-    named_table("Data source status", status_df)
-
     nvda = prices.loc[prices["ticker"] == "NVDA"]
     stock_bt, stock_metrics, _, stock_status, stock_reason = run_us_stock_paper(nvda, risk_rules)
     if has_crypto_symbol(crypto, "BTC-USD"):
@@ -778,6 +842,7 @@ def page_dashboard(prices, crypto, market_universe, scored, finance_research, ri
         named_table("FinanceMCP high-priority research inputs", high_priority)
 
     named_table("Top long-term candidates", scored[["ticker", "company", "tags", "score_label", "bucket", "growth_evidence"]].head(8))
+    render_data_source_debug(source_status)
 
 
 def page_market_universe(market_universe):
@@ -849,6 +914,15 @@ def page_watchlist(scored):
         "This desk ranks companies by narrative space, acceleration, margin quality, cash flow, value-chain position, disagreement, and valuation tolerance. The goal is to find stories already converting into financial proof.",
         ["Narrative", "Growth proof", "Invalidation"],
     )
+    section_label("Long-Term Observation Discipline")
+    checklist_cols = st.columns(3)
+    with checklist_cols[0]:
+        render_research_checklist("Continue / Hold", HOLD_OBSERVATION_CONDITIONS)
+    with checklist_cols[1]:
+        render_research_checklist("Exit / Stop Tracking", EXIT_OBSERVATION_CONDITIONS)
+    with checklist_cols[2]:
+        render_research_checklist("Tenbagger Discovery", TENBAGGER_DISCOVERY_FRAMEWORK, " + ")
+
     bucket_filter = st.multiselect("Bucket", sorted(scored["bucket"].unique()), default=list(sorted(scored["bucket"].unique())))
     view = scored.loc[scored["bucket"].isin(bucket_filter)].copy()
     named_table(
@@ -913,6 +987,13 @@ def page_tenbagger_profile(prices, financials, scored, industry_map, forecasts, 
         """,
         unsafe_allow_html=True,
     )
+    discovery_cols = st.columns(3)
+    with discovery_cols[0]:
+        render_research_checklist("Tenbagger Discovery", TENBAGGER_DISCOVERY_FRAMEWORK, " + ")
+    with discovery_cols[1]:
+        render_research_checklist("Continue / Hold", HOLD_OBSERVATION_CONDITIONS)
+    with discovery_cols[2]:
+        render_research_checklist("Exit / Stop Tracking", EXIT_OBSERVATION_CONDITIONS)
 
     score_cols = ["monopoly_score", "gross_margin_power", "irreplaceability", "ten_year_optionality", "capital_intensity"]
     score_df = pd.DataFrame(
@@ -1195,6 +1276,15 @@ def page_stock_detail(prices, financials, scored, forecasts, data_mode):
         st.markdown(f'<div class="runjin-thesis"><h4>Invalidation</h4><p>{profile["invalidation"]}</p></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="runjin-thesis"><h4>Buy Plan</h4><p>{profile["buy_plan"]}</p></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="runjin-thesis"><h4>Bucket</h4><p>{profile["bucket"]}</p></div>', unsafe_allow_html=True)
+
+    section_label("Observation Checklist")
+    observation_cols = st.columns(3)
+    with observation_cols[0]:
+        render_research_checklist("Continue / Hold", HOLD_OBSERVATION_CONDITIONS)
+    with observation_cols[1]:
+        render_research_checklist("Exit / Stop Tracking", EXIT_OBSERVATION_CONDITIONS)
+    with observation_cols[2]:
+        render_research_checklist("Tenbagger Discovery", TENBAGGER_DISCOVERY_FRAMEWORK, " + ")
 
     fin_view = ticker_financials.copy()
     for col in ["revenue_growth_yoy", "gross_margin", "operating_cash_flow_margin", "net_income_margin"]:
@@ -1510,6 +1600,143 @@ def page_research_journal(scored):
     st.text_area("Markdown draft", value=build_markdown_note(ticker, sections), height=420, key="journal_draft")
     entries = list_journal_entries()
     named_table("Existing journal entries", entries if not entries.empty else pd.DataFrame([{"note": "No local journal markdown files yet"}]))
+
+
+def page_ollama_research_assistant(scored, financials):
+    page_header(
+        "Local AI / Research Assistant",
+        "投研小助手",
+        "Ask a local Ollama model to pressure-test the current thesis, invalidation points, and next research checks.",
+        ["本地模型", "投研问答", "不下单"],
+    )
+    status = ollama_status()
+    status_label = "已连接" if status["available"] else "未连接"
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Ollama", status_label)
+    col2.metric("默认模型", DEFAULT_OLLAMA_MODEL)
+    col3.metric("本地地址", DEFAULT_OLLAMA_URL.replace("http://", ""))
+
+    if not status["available"]:
+        st.warning("Ollama 还没有连上。请先在本机启动 Ollama，并确认模型已拉取，例如 `ollama pull qwen2.5:7b`。")
+        with st.expander("错误信息", expanded=False):
+            st.code(status["message"])
+        return
+
+    models = status["models"] or [DEFAULT_OLLAMA_MODEL]
+    default_index = models.index(DEFAULT_OLLAMA_MODEL) if DEFAULT_OLLAMA_MODEL in models else 0
+    model = st.selectbox("模型", models, index=default_index)
+    ticker = st.selectbox("股票", scored["ticker"].tolist(), key="ollama_ticker")
+    profile = scored.loc[scored["ticker"] == ticker].iloc[0]
+    ticker_financials = financials.loc[financials["ticker"] == ticker].sort_values("quarter")
+
+    quick_questions = {
+        "这只票现在最该验证什么？": "这只股票当前最关键的验证点是什么？请按产业、公司、财务、价格结构拆解。",
+        "继续跟踪还是降级？": "根据继续跟踪条件和放弃条件，这只股票应该继续跟踪、降级观察还是暂时剔除？",
+        "牛股框架打分": "用识别牛股框架逐项评估这只股票，每项给出通过/待验证/不通过。",
+        "找反方证据": "请站在反方角度，列出最可能证伪这个长期 thesis 的证据。",
+    }
+    selected_question = st.radio("常用问题", list(quick_questions.keys()), horizontal=True)
+    question = st.text_area(
+        "你的问题",
+        value=quick_questions[selected_question],
+        height=110,
+        key="ollama_question",
+    )
+
+    if st.button("问小助手", type="primary", key="ollama_ask"):
+        with st.spinner("本地模型思考中..."):
+            prompt = build_ollama_research_prompt(ticker, profile, ticker_financials, question)
+            try:
+                answer = ask_ollama(prompt, model=model)
+            except Exception as exc:
+                st.error(f"Ollama 调用失败：{exc}")
+                return
+        st.markdown(answer)
+
+    with st.expander("当前投研上下文", expanded=False):
+        st.markdown(f"**{ticker} / {profile['company']}**")
+        st.markdown(f"- 叙事：{profile['narrative']}")
+        st.markdown(f"- 成长证据：{profile['growth_evidence']}")
+        st.markdown(f"- 失效条件：{profile['invalidation']}")
+        st.markdown(f"- 买入计划：{profile['buy_plan']}")
+
+
+def page_single_stock_sync():
+    page_header(
+        "Data Sync / Single Stock",
+        "单股同步",
+        "Sync one quote with visible main route, fallback route, failure reason, and market_quotes persistence state.",
+        ["主链路", "回退链路", "落库状态"],
+    )
+    col1, col2, col3 = st.columns([1, 1, 1])
+    symbol = col1.text_input("代码", value="NVDA", key="sync_symbol")
+    market = col2.selectbox("市场", ["US", "A_SHARE", "HK", "CN"], index=0, key="sync_market")
+    ttl = col3.number_input("缓存秒数", min_value=0, max_value=3600, value=120, step=30, key="sync_ttl")
+    if st.button("同步", type="primary", key="sync_single_quote"):
+        with st.spinner("同步行情中..."):
+            result = sync_single_quote(symbol.strip(), market=market, cache_ttl_seconds=int(ttl))
+        st.session_state["single_sync_result"] = result
+
+    result = st.session_state.get("single_sync_result")
+    if result:
+        summary, attempts, quotes = result_to_frames(result)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("状态", result["status"])
+        c2.metric("主链路", result["main_route"])
+        c3.metric("回退链路", result["fallback_route"])
+        c4.metric("market_quotes", "已写入" if result["market_quotes_saved"] else "未写入")
+        named_table("Sync summary", summary)
+        named_table("Route attempts", attempts)
+        named_table("market_quotes row", quotes)
+
+
+def page_batch_analysis(scored, financials):
+    page_header(
+        "Batch Research / Multi Stock",
+        "批量分析",
+        "Analyze multiple watchlist names in one pass and rank by long-term score plus latest financial proof.",
+        ["多股", "排序", "进度"],
+    )
+    default_tickers = scored.head(5)["ticker"].tolist()
+    tickers = st.multiselect("股票", scored["ticker"].tolist(), default=default_tickers, key="batch_long_tickers")
+    progress = analysis_progress_rows(tickers)
+    named_table("Analysis progress", progress)
+    if st.button("开始批量分析", type="primary", key="batch_long_run"):
+        with st.spinner("批量分析中..."):
+            result = batch_long_analysis(scored, financials, tickers)
+        st.session_state["batch_long_result"] = result
+    result = st.session_state.get("batch_long_result")
+    if result is not None:
+        view = result.copy()
+        for col in ["revenue_growth_yoy", "gross_margin", "ocf_margin"]:
+            if col in view:
+                view[col] = view[col].map(lambda value: fmt_pct(value) if pd.notna(value) else "N/A")
+        named_table("Batch long analysis", view)
+
+
+def page_system_capabilities(source_status):
+    page_header(
+        "System / Capabilities",
+        "系统能力",
+        "Hidden operating layer for model providers, task policies, cache status, and data-source diagnostics.",
+        ["模型", "缓存", "数据"],
+    )
+    tabs = st.tabs(["模型能力", "缓存管理", "数据源状态", "导出能力"])
+    with tabs[0]:
+        named_table("LLM providers", pd.DataFrame(provider_table()))
+        named_table("Task model policy", pd.DataFrame(task_policy_table()))
+    with tabs[1]:
+        cache = CacheManager()
+        entries = pd.DataFrame(cache.list_entries())
+        named_table("Cache entries", entries if not entries.empty else pd.DataFrame([{"note": "No cache entries yet"}]))
+        namespace = st.text_input("清理命名空间", value="quote", key="cache_namespace")
+        if st.button("清理缓存", key="cache_clear"):
+            deleted = cache.clear_namespace(namespace.strip())
+            st.success(f"已清理 {deleted} 个缓存文件")
+    with tabs[2]:
+        render_data_source_debug(source_status)
+    with tabs[3]:
+        named_table("Report export capabilities", pd.DataFrame(report_export_capabilities()))
 
 
 def page_backtest_lab(prices, crypto):
@@ -1900,16 +2127,35 @@ def page_weekly_report(prices, crypto, scored, risk_rules):
         volume_price_note=volume_price_note,
     )
     st.markdown(report)
+    if st.button("导出 Markdown", key="weekly_export_md"):
+        path = export_markdown_report("weekly_trade_lab_review", report)
+        st.success(f"已导出：{path}")
 
 
 def page_long_research_desk(prices, crypto, financials, market_universe, scored, industry_map, forecasts, finance_research, source_status, data_mode):
-    subpage = st.radio(
-        "Research layer",
-        ["10x Stock Profile", "Market Universe", "Long Watchlist", "Finance Radar", "Research Journal"],
+    subpage_label = st.radio(
+        "研究模块",
+        ["投研小助手", "单股同步", "批量分析", "牛股框架", "股票池", "观察清单", "研究雷达", "研究日志"],
         horizontal=True,
         key="long_research_layer",
     )
-    if subpage == "10x Stock Profile":
+    subpage = {
+        "投研小助手": "Research Assistant",
+        "单股同步": "Single Sync",
+        "批量分析": "Batch Analysis",
+        "牛股框架": "10x Stock Profile",
+        "股票池": "Market Universe",
+        "观察清单": "Long Watchlist",
+        "研究雷达": "Finance Radar",
+        "研究日志": "Research Journal",
+    }[subpage_label]
+    if subpage == "Research Assistant":
+        page_ollama_research_assistant(scored, financials)
+    elif subpage == "Single Sync":
+        page_single_stock_sync()
+    elif subpage == "Batch Analysis":
+        page_batch_analysis(scored, financials)
+    elif subpage == "10x Stock Profile":
         page_tenbagger_profile(prices, financials, scored, industry_map, forecasts, data_mode)
     elif subpage == "Market Universe":
         page_market_universe(market_universe)
@@ -1922,12 +2168,17 @@ def page_long_research_desk(prices, crypto, financials, market_universe, scored,
 
 
 def page_signal_lab(prices, crypto, forecasts, market_universe, data_mode):
-    subpage = st.radio(
-        "Signal layer",
-        ["K-line & Launch Points", "SEPA Trend Template", "Intraday Scenarios"],
+    subpage_label = st.radio(
+        "分析模块",
+        ["K线启动点", "SEPA趋势", "盘中情景"],
         horizontal=True,
         key="trading_signal_layer",
     )
+    subpage = {
+        "K线启动点": "K-line & Launch Points",
+        "SEPA趋势": "SEPA Trend Template",
+        "盘中情景": "Intraday Scenarios",
+    }[subpage_label]
     if subpage == "K-line & Launch Points":
         page_kline_lab(prices, forecasts, market_universe, data_mode)
     elif subpage == "SEPA Trend Template":
@@ -1941,37 +2192,48 @@ def main():
     st.sidebar.markdown(
         """
         <div style="padding: 10px 4px 18px;">
-          <div style="font-size: 24px; font-weight: 850; color: #e8ebe8; line-height: 1;">润金</div>
-          <div style="font-family: SF Mono, Menlo, monospace; color: #2ed17c; font-size: 11px; letter-spacing: .08em; margin-top: 8px;">RUNJIN TRADE SYSTEM</div>
+          <div style="font-size: 22px; font-weight: 850; color: #e8ebe8; line-height: 1;">润金交易系统</div>
+          <div style="font-family: SF Mono, Menlo, monospace; color: #2ed17c; font-size: 11px; letter-spacing: .08em; margin-top: 8px;">v0.2</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
     data_mode = "live"
-    st.sidebar.markdown(
-        """
-        <div class="runjin-note" style="margin-bottom: 12px;">
-          Data source: <strong>Realtime research feed</strong><br>
-          No bundled sample fallback is used in this mode.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
     try:
         prices, crypto, financials, market_universe, scored, industry_map, forecasts, finance_research, risk_rules, source_status = load_all_data(data_mode)
     except Exception as exc:
         st.sidebar.error(f"Realtime data failed: {exc}")
         st.sidebar.caption("The app is now configured to use real-time research data only, so it stops instead of falling back to bundled samples.")
         st.stop()
-    desk = st.sidebar.radio("Workbench", ["Long-term Investing", "Mid/Short Trading"], index=0)
-    page_options = (
-        ["Dashboard", "Research Desk", "Weekly Review"]
-        if desk == "Long-term Investing"
-        else ["Dashboard", "Signal Lab", "Capital Rotation", "Backtest Lab", "Paper Bot", "Weekly Review"]
+    nav_labels = {
+        "Dashboard": "D  仪表盘",
+        "Research Desk": "R  长期研究",
+        "Signal Lab": "T  技术分析",
+        "Capital Rotation": "M  资金轮动",
+        "Backtest Lab": "B  回测复盘",
+        "Paper Bot": "A  模拟交易",
+        "Weekly Review": "LG 周报",
+        "System Capabilities": "⚙ 系统能力",
+    }
+    page_reverse = {label: key for key, label in nav_labels.items()}
+    page_label = st.sidebar.radio(
+        "导航",
+        [
+            nav_labels["Dashboard"],
+            nav_labels["Research Desk"],
+            nav_labels["Signal Lab"],
+            nav_labels["Capital Rotation"],
+            nav_labels["Backtest Lab"],
+            nav_labels["Paper Bot"],
+            nav_labels["Weekly Review"],
+            nav_labels["System Capabilities"],
+        ],
+        label_visibility="collapsed",
     )
-    page = st.sidebar.radio("Workspace", page_options)
-    st.sidebar.caption(f"MODE / {data_mode}")
-    st.sidebar.caption("BOUNDARY / V0.1 never places real orders.")
+    page = page_reverse[page_label]
+    with st.sidebar.expander("系统状态", expanded=False):
+        st.caption(f"MODE / {data_mode}")
+        st.caption("BOUNDARY / V0.2 never places real orders.")
 
     if page == "Dashboard":
         page_dashboard(prices, crypto, market_universe, scored, finance_research, risk_rules, source_status)
@@ -1987,6 +2249,8 @@ def main():
         page_short_bot(prices, crypto, risk_rules)
     elif page == "Weekly Review":
         page_weekly_report(prices, crypto, scored, risk_rules)
+    elif page == "System Capabilities":
+        page_system_capabilities(source_status)
 
 
 if __name__ == "__main__":
